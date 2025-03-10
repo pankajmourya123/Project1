@@ -1,0 +1,43 @@
+step 1-- we have install iib /ace 
+step 2-- log4j
+step 3-- syslog
+step 4-- odbc.ini
+step 5--  sql drivers
+
+
+INSTALL IIB /ACE 
+dwonlaod tar file 
+untar it 
+accept linces 
+take mqsimyprofile path and add in .bash_profile(app/IIB.12.0.12.5/ace.12.0.12.5/server/bin/mqsiprofile add this path in .bash_profile and save it then run mqsilist to check that mqsi is running or not)
+why we add in . bash_profile ?
+because when ever a user start teh server the bash_profile file runn and your mqsiprofile commands also automatically get runs (if we don"t then we have manually run mqsiprofile every time when we start server)
+. bash_profile is hidden file (to see ls -a)
+
+
+
+LOG4J
+log.cdtc file
+xml file 
+three jars in applications
+
+SYSLOG(to see system log means suppise your started stoped )
+write mail to idm team and we provide the path for sys log they will configure
+var/log/user.log
+
+ODBC.INI 
+frist of all we need a driver when ever we want to connect to any database( for eg odbcoracleconnector or odbcmysqlconnector)
+after we get driver we have to put this deriver in lib floder (app/IIB.12.0.12.5/ace.12.0.12.5/server/ODBC/drivers/lib)
+then we have come in odbc.ini file and add the stanza we want 
+dsn name
+driver_path=app/IIB.12.0.12.5/ace.12.0.12.5/server/ODBC/drivers/lib/odbcmqsqlconnetor
+sid,user,password
+MQSISETDBPARMS brokername -n DSN -u user -p Password 
+Mqsicvp brokername -n DSN to check that dsn get connected or not 
+restart broker 
+
+add 
+EXPORT ODBCINI=odbc.ini file  path in .bash_profile 
+
+
+ 
