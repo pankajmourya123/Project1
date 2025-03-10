@@ -1,0 +1,213 @@
+mqsireportproperties IIBUATONEMONEY -e ACCAGG -o HTTPConnector -r
+
+mqsichangeproperties IIBUATBRKR -b httplistener -o HTTPSConnector -v true 
+mqsichangeproperties IIBUATBRKR -e ACCAGG -o HTTPConnector -n port -v 8081
+
+mqsichangeproperties IIBUATBRKR -b httplistener -o HTTPConnector -n port -v 8081
+
+mqsichangeproperties IIBPRODBRKR -b httplistener -o HTTPConnector -n port -v 8080
+mqsichangeproperties IIBPRODBRKR -b httplistener -o HTTPListener -n startListener -v false
+mqsichangeproperties IIBONEMONEY -b httplistener -o HTTPListener -n enableSSLConnector -v true
+
+mqsireportproperties IIBUATONEMONEY -b httplistener -o HTTPSConnector -n 8081
+
+mqsireportproperties IIBUATBRKR -e ACCAGG -o HTTPConnector -a
+
+mqsireportproperties IIBPRODBRKR -b httplistener -o HTTPListener -a
+
+mqsichangeproperties IIBUATONEMONEY -e ACCAGG -o ExecutionGroup -n httpNodesUseEmbeddedListener -v true
+
+mqsichangeproperties IIBUATONEMONEY -b httplistener -o HTTPListener -n startListener -v false (while doing eg level http port false)
+
+
+mqsidepolybar IIBUATONEMONEY -e ACCAGG -d Account_Discovery(Deleting application from the broker)
+
+
+mqsichangeproperties IIBONEMONEY -e SERVER -o ComIbmJVMManager -n jvmDebugPort -v 8082
+
+--------- UAT Truststore path-------------------
+/var/iib/interface/hdfc/neft/inward/signature/hdfcuatkestore.jks
+
+/var/var/iib/interface/Onemoney/sectigo.cer
+
+
+---------------------------deleting the DSN -------------------------------------
+mqsisetdbparms IBNODE -n USERDB1 -d
+
+
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+------------ AA Bar File path --------------------------------
+
+/var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files
+
+------------ AA Properties file path ----------------------------
+
+ /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Properties_files
+ 
+ 
+
+-------------------------- checking the logs in Account Aggregator -----------------------------------
+
+/var/mqsi/ACCOUNT_AGGREGATOR_log4j                   (NOte : Don't open (AccAgg_log4j.xml) and (log4j.dtd) files)
+
+-------------------------- bar files and properties files -----------------------------------
+
+/var/mqsi/AccountAggregator_PropertyFiles_and_BAR
+
+
+
+-----------------------------deleteing the api -----------------------
+
+mqsideploy  brokername -e EG -d barfilename
+
+mqsideploy  IIBDRBRKR -e ACCAGG -d Account_Discovery
+mqsideploy  IIBDRBRKR -e ACCAGG -d Account_Linking_Request
+mqsideploy  IIBDRBRKR -e ACCAGG -d Account_Linking_Verification
+mqsideploy  IIBDRBRKR -e ACCAGG -d FI_Data_Fetch
+
+
+
+
+----------------------------Genarating the property file ---------------------------------
+
+mqsireadbar -b Path/barfilename -r > Path/Propertie file
+
+mqsireadbar -b /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/Account_Discovery.bar -r > /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Properties_files/Account_Discovery.properties
+
+mqsireadbar -b /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/Account_Linking_Request.bar -r > /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Properties_files/Account_Linking_Request.properties
+
+mqsireadbar -b /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/Account_Linking_Verification.bar -r > /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Properties_files/Account_Linking_Verification.properties
+
+mqsireadbar -b /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/FI_Data_Fetch.bar -r > /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Properties_files/FI_Data_Fetch.properties
+
+
+
+-------------------------------over ride the propertie files----------------------------------------------
+
+mqsiapplybaroverride -b <location of the bar file> -p <location of changed propetie file> -r  
+
+mqsiapplybaroverride -b /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/Account_Discovery.bar -p /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Properties_files/Account_Discovery.properties -r
+
+mqsiapplybaroverride -b /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/Account_Linking_Request.bar -p /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Properties_files/Account_Linking_Request.properties -r
+
+mqsiapplybaroverride -b /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/Account_Linking_Verification.bar -p /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Properties_files/Account_Linking_Verification.properties -r
+
+
+mqsiapplybaroverride -b /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/FI_Data_Fetch.bar -p /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Properties_files/FI_Data_Fetch.properties -r
+
+
+
+
+------------------------------Deploying the bar files -------------------------------------
+mqsideploy IIBUATONEMONEY -e ACCAGG -a bar file path    
+
+mqsideploy IIBDRBRKR -e ACCAGG -a /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/Account_Discovery.bar
+
+mqsideploy IIBDRBRKR -e ACCAGG -a /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/Account_Linking_Request.bar
+
+mqsideploy IIBDRBRKR -e ACCAGG -a /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/Account_Linking_Verification.bar
+
+mqsideploy IIBDRBRKR -e ACCAGG -a /var/mqsi/AccountAggregator_PropertyFiles_and_BAR/Account_Aggregator_Bar_files/FI_Data_Fetch.bar
+
+
+
+===============================================================SSL=============================================================================================================
+ ------------------------genarating the jks file ---------------------------------------------------
+ 
+ keytool -genkey -alias Account_Aggregator -keyalg RSA -keystore /var/mqsi/AccountAggregator_SSL/KeyStore.jks -keysize 2048 
+ keytool -genkey -alias ACCAGG -keyalg RSA -keystore /var/mqsi/AccountAggregator_SSL/TustStore.jks -keysize 2048 
+ 
+ 
+ -----------------importing -------------------------
+ keytool -import -trustcacerts -alias <alias name> -file /path/certificate.crt -keystore /path/Truststore.jks -storetype jks m  storepass ****password
+ 
+-----------------------------------------importing certificates to truststore ----------------------------------
+keytool -import -trustcacerts -alias AccAgg_myvfirst -file /var/mqsi/AccountAggregator_SSL/myvfirst_ssl_certificates/910048907.crt -keystore /var/mqsi/AccountAggregator_SSL/KeyStore.jks -storetype jks -storepass ACCAGG
+
+keytool -import -trustcacerts -alias AccAgg_AAA_cert -file /var/mqsi/AccountAggregator_SSL/myvfirst_ssl_certificates/AAACertificateServices.crt -keystore /var/mqsi/AccountAggregator_SSL/KeyStore.jks -storetype jks -storepass ACCAGG
+
+keytool -import -trustcacerts -alias AccAgg_sectigo -file /var/mqsi/AccountAggregator_SSL/myvfirst_ssl_certificates/SectigoRSADomainValidationSecureServerCA.crt -keystore /var/mqsi/AccountAggregator_SSL/KeyStore.jks -storetype jks -storepass ACCAGG
+
+keytool -import -trustcacerts -alias AccAgg_usertrust -file /var/mqsi/AccountAggregator_SSL/myvfirst_ssl_certificates/USERTrustRSAAAACA.crt -keystore /var/mqsi/AccountAggregator_SSL/KeyStore.jks -storetype jks -storepass ACCAGG
+
+
+keytool -import -trustcacerts -alias AccAgg_myvfirstcert -file /var/mqsi/AccountAggregator_SSL/myvfirst_ssl_certificates/2141792389.crt -keystore /var/mqsi/AccountAggregator_SSL/KeyStore.jks -storetype jks -storepass ACCAGG
+ 
+ 
+ 
+-------------------------------------------------To list the certificates--------------------------------------------------
+keytool -list -v -keystore /var/mqsi/AccountAggregator_SSL/KeyStore.jks -storetype jks -storepass ACCAGG
+
+---------------------------------------------------------------------------------------------------------------------------
+mqsireportproperties IIBDRBRKR -o BrokerRegistry -r
+
+mqsichangeproperties IIBONEMONEY -o BrokerRegistry -n brokerKeystoreFile -v /var/mqsi/AccountAggregator_SSL/KeyStore.jks
+mqsichangeproperties IIBONEMONEY -o BrokerRegistry -n brokerTruststoreFile -v /var/mqsi/AccountAggregator_SSL/Truststore.jks
+ 
+mqsisetdbparms IIBDRBRKR -n brokerKeystore::password -u ignore -p ACCAGG
+mqsisetdbparms IIBDRBRKR -n brokerTruststore::password -u ignore -p ACCAGG
+
+keytool -list -v -keystore /var/iib/interface/hdfc/neft/inward/signature/hdfcapitruststorepublic.jks -storetype jks -storepass hdfc123
+
+mqsichangeproperties IIBUATBRKR -b httplistener -o HTTPListener -n enableSSLConnector -v true 
+
+mqsichangeproperties IIBDRBRKR -b httplistener -o HTTPListener -n TLSProtocols -v TLSv1.2
+
+mqsireportproperties IIBDRBRKR -e ACCAGG -o HTTPConnector -r
+
+mqsireportproperties IIBDRBRKR -b httplistener -o HTTPSConnector -r
+
+mqsichangeproperties IIBDRBRKR -b httplistener -o HTTPSConnector -n clientAuth -v true
+
+mqsichangeproperties IIBDRBRKR -b httplistener -o HTTPSConnector -n sslProtocol -v TLSv1.2
+ 
+
+
+mqsichangeproperties IIBDRBRKR -o BrokerRegistry -n TLSProtocols -v TLSv1.2
+mqsireportproperties IIBUATONEMONEY -o BrokerRegistry -a 
+mqsireportproperties IIBDRBRKR -b httplistener -o HTTPListener -a
+ 
+mqsichangeproperties IIBUATBRKR -e ACCAGG -o HTTPSConnector -n ReqClientAuth -v true
+mqsichangeproperties IIBUATBRKR -e ACCAGG -o HTTPSConnector -n explicitlySetPortNumber -v 8080
+mqsichangeproperties IIBUATBRKR -e ACCAGG -o HTTPSConnector -n TLSProtocols -v TLSv1.2
+
+
+
+
+
+
+ikeycmd -cert -create -db /var/mqsi/AccountAggregator_SSL/Keystore.jks -pw ACCAGG -type jks -label comibmssl
+ -------------------------detele certificate from jks------------------------------------
+ 
+ keytool -delete -alias accagg_myvfirst -keystore /var/mqsi/AccountAggregator_SSL/KeyStore.jks -storepass ACCAGG
+ 
+ 
+=============================================================================================================================================================================
+ 
+  ----------------------changing the port number in Eg level------------------------
+ mqsireportproperties IIBONEMONEY -e SERVER -o HTTPConnector -r
+ 
+ mqsichangeproperties IIBONEMONEY -e SERVER -o HTTPConnector -n explicitlySetPortNumber -v 8080
+ 
+ mqsichangeproperties IIBONEMONEY -e SERVER -o HTTPConnector -n port -v 8080
+ 
+ mqsireportproperties IIBONEMONEY -e SERVER -o HTTPConnector -a
+    
+
+------------------- Trace Log   for debuging -----------------------------
+
+mqsichangetrace IIBUATONEMONEY -t -e ACCAGG -l debug -r
+
+mqsichangetrace IIBUATONEMONEY -t -e ACCAGG -l none
+
+mqsireadlog IIBUATONEMONEY -t -e ACCAGG -f -o /{path}/trace.xml
+
+mqsiformatlog -i /path/trace.xml -o /path/trace1.txt
+ 
+ 
+  
