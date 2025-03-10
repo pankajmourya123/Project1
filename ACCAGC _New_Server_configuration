@@ -37,7 +37,7 @@ Mqsicvp brokername -n DSN to check that dsn get connected or not
 restart broker 
 
 add 
-EXPORT ODBCINI=odbc.ini file  path in .bash_profile 
+EXPORT ODBCINI=/name/finshare/odbc.ini file  path in .bash_profile 
 
 
  
