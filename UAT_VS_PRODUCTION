@@ -7,3 +7,6 @@ only one server(10.43.49.92)                                         two server
 in odbc.ini ther are two stanza                    
 1 for iib( mysql) dsn                                                1 for iib(mysql)                                           
 1 for cbs(oracel) dsn                                               17 for  cbs 17 bank 
+---------------------------------------------------------------------------------------
+schema  name                                                               schema name
+Oradata_accagguat                                                     oradata_accagg            
