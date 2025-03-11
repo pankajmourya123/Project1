@@ -1,0 +1,935 @@
+BROKER SCHEMA com.cedge.DataFetch
+PATH com.cedge.FI_DATA_exp;
+
+CREATE COMPUTE MODULE DataFetch_Routing_Compute
+	DECLARE ConfigFile EXTERNAL CHARACTER;
+	DECLARE AA_BANK_IDENTITY EXTERNAL CHARACTER '';
+	DECLARE SCHEMANAME EXTERNAL CHARACTER '';
+	DECLARE DSN EXTERNAL CHARACTER '';
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN 
+		DECLARE httpMethod CHARACTER;
+    
+    -- Get the HTTP method from the request
+    SET httpMethod = SUBSTRING(InputRoot.HTTPInputHeader."X-Original-HTTP-Command" FROM 1 FOR 4);
+
+    -- Allow only POST requests
+    IF httpMethod <> 'POST' THEN
+        SET OutputRoot.HTTPReplyHeader."Content-Type" = 'application/json';
+        SET OutputRoot.HTTPReplyHeader."X-Error-Message" = '405 Method Not Allowed';
+        SET OutputRoot.HTTPResponseHeader.StatusCode = 405;
+        
+        RETURN FALSE;
+    END IF;
+
+    -- Continue processing for valid POST requests
+	       CALL CopyEntireMessage();
+		RETURN TRUE;
+	END;
+
+	
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		DECLARE inref REFERENCE TO InputRoot.JSON.Data;
+		DECLARE inurl CHARACTER;
+		DECLARE Acc_number CHARACTER;
+		DECLARE Profile ROW;
+		DECLARE Transactions ROW;
+		DECLARE Profile_summary ROW;  ----- Deposit
+		SET inurl = InputRoot.HTTPInputHeader."X-Original-HTTP-Command" ;
+		DECLARE query CHARACTER;
+        SET Acc_number = SUBSTRING(inref.accNo FROM 0 FOR 17); 
+        
+        
+        ----------log Referece number-------------------------------------
+		DECLARE logref DECIMAL RAND()*(10-2)+2;
+		SET logref = logref*100000000; 
+		DECLARE log_ref CHARACTER CAST (logref as CHARACTER); 
+		DECLARE Reference_log CHARACTER SUBSTRING(log_ref FROM 1 FOR 8);
+		-----------------------------------------------------------------
+        DECLARE rc BOOLEAN;
+        DECLARE payload CHARACTER;
+		CALL initLog4j(ConfigFile) INTO rc;
+		SET payload = CAST(ASBITSTREAM(InputRoot.JSON.Data CCSID InputRoot.Properties.CodedCharSetId ENCODING InputRoot.Properties.Encoding) AS CHARACTER CCSID InputRoot.Properties.CodedCharSetId ENCODING InputRoot.Properties.Encoding); 
+--		CALL log4j_1_1('FI_DATA_FETCH', 'FI_DATA_FETCH', 'INFO','----------------start logging --------------------') INTO rc;
+--		CALL log4j_1_1('FI_DATA_FETCH', 'FI_DATA_FETCH', 'INFO','Request data:'||payload) INTO rc;
+		SET Environment.payload = payload;
+		---------------------bank name --------------------------- 
+	DECLARE bankname ROW;
+	DECLARE bank_name CHARACTER;
+	DECLARE DSN2 CHARACTER; 
+	SET bank_name = 'SELECT BANK_CODE,DSN,SCHEMANAME FROM '||SCHEMANAME||'.'||AA_BANK_IDENTITY||' WHERE BANK_ID = ?'; 
+	SET bankname.C[] = PASSTHRU(bank_name TO Database.{DSN} VALUES(inref.bankId));
+    SET DSN2 = bankname.C.DSN;
+--    CALL log4j_1_1('FI_DATA_FETCH', 'FI_DATA_FETCH', 'INFO','BANK code:'||bankname.C.BANK_CODE) INTO rc;
+--    CALL log4j_1_1('FI_DATA_FETCH', 'FI_DATA_FETCH', 'INFO','DSN:'||bankname.C.DSN) INTO rc;
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------    
+	---------------------------------------Deposit -------------------------------------------------------------------------------------------------------------	
+	------------------------------------------------------------------------------------------------------------------------------------------------------------	
+		IF CONTAINS(inurl , 'deposit') THEN  
+
+			SET Environment.alter = PASSTHRU('ALTER SESSION SET NLS_DATE_FORMAT = ''DD-MON-YYYY HH24:MI:SS'' ' TO Database.{DSN2});
+			SET Profile_summary.C[] = PASSTHRU('select /*+ parallel (AUTO,INVM) */ ''SELF'' as HOLDER_TYPE,
+			(select trim(NAME1)||'' ''||trim(mid_name)||'' ''||trim(NAME2) from cusvaa where cust_no = i.customer_no and effe_date = 0) as Cust_Name,
+			(select decode(BIRTH_DATE_1,''0'',''0'',to_char(BIRTH_DATE_1 + to_date(''31-dec-1899'',''dd-mon-yyyy''),''DD/MM/YYYY''))
+             from cusvdd where customer_no = substr(key_1,4,16) and key_1 like ''003%'' and rownum < 2 ) as DOB,
+			(select trim(telex_no) from cusvaa where cust_no = i.customer_no and effe_date = 0 and length(trim(telex_no)) = ''10'') MOB_NO,
+			''NOT-REGISTERED'' Nominee ,
+			(select EMAIL_ADD1 from cumi where cust_no = i.customer_no and rownum < 2) EMAIL_1,
+			(select cust_tax_pan from cusm where cust_acct_no = i.customer_no and rownum < 2) PAN, ''TRUE'' ckyccompliance, curr_bal CurrentBalance, ''INR'' currency, '' '' exchgeRate,
+			(SELECT CURRENT_DATE||''''||SESSIONTIMEZONE FROM DUAL where rownum < 2) as balancedatetime ,
+			case WHEN acct_type like ''1%'' THEN ''SAVINGS''
+			WHEN acct_type like ''5%'' THEN ''CURRENT'' end as type,
+			branch_no, case when acct_type like ''5%'' then ''CC'' else '' '' END as facility,
+			(case when ? IN (''APGB'',''ARGB'') THEN (select IFSC_CODE from ifsc where branch_no = BRANCH_CODE and trim(BANK_CODE) = ''000'') ELSE
+            (select IFSC_CODE from ifsc where BRANCH_CODE = ''99922'' and rownum <2) END) IFSC_CODE, 
+			(Select MICR_CODE from brhm where ''00300000000000''||branch_no = key_1) MICR_CODE, to_char(ACCT_OPEN_DT + TO_DATE(''31-DEC-1899'',''DD-MON-YYYY''),''DD-MON-YYYY'') as Opening_date,
+			'' '' CurrentODLimit, DRAWING_AMOUNT,
+			decode(curr_status,''00'',''ACTIVE'',''01'',''DORMANT'',''02'',''DORMANT UNCLAIMED'',''03'',''INOPERATIVE'',''07'',''CLOSED'',''11'',''INACTIVE'',''12'',''IRREGULAR'',''14'',''MATURED'') as STATUS,
+			''0'' Pending_amount
+			from invm i
+			where curr_status <> ''07''
+			and key_1 = ''003''||?
+			and (key_1 not in (select /*+ parallel (AUTO,RELM) */ substr(key_1,1,19) from relm where substr(key_1,23,4) = ''0029'') OR
+			key_1 not in (select /*+ parallel (AUTO,RELM) */ substr(key_1,27,19) from relm where substr(key_1,23,4) = ''0029''))' TO Database.{DSN2} VALUES(bankname.C.BANK_CODE,Acc_number));       
+			
+			-------------------Transactions Qurey --------------------------
+			        DECLARE fromDate CHARACTER;
+			        DECLARE toDate CHARACTER;
+			        DECLARE i INTEGER 1;
+			        DECLARE itaration_value CHARACTER;
+			SET fromDate = SUBSTRING(inref.fromDate BEFORE 'T');
+			SET toDate = SUBSTRING(inref.toDate BEFORE 'T');
+ 
+
+			SET Transactions.B[] = PASSTHRU('select /*+  INDEX(inct,INCTUK_04) */ JRNL_NO,abs(BASECONV.CONVDATA(t.VAR_AREA,33,8,3)) amount,
+			
+			(select TRIM(TEXT) from txop where key_1 = ''003''||lpad(BASECONV.CONVDATA(VAR_AREA,17,4),6,''0'')||''TCSH01'') Narration,
+			case when BASECONV.CONVDATA(t.VAR_AREA,33,8,3) > 0 then ''CREDIT'' else ''DEBIT'' END AS tran_type,
+			''CASH'' mode_of_Tran,
+			BASECONV.CONVDATA(t.VAR_AREA,41,8,3) Balance, decode(TRAN_DATE,0,''0'',to_char(TO_DATE((2415020 + TRAN_DATE), ''J''),''YYYY-MM-DD''))||'' ''||
+			case when length(trim(post_time)) between 3 and 7 then 
+			substr(LPAD(RPAD(post_time,8,0),9,0),1,2)||'':''|| substr(LPAD(RPAD(post_time,8,0),9,0),3,2)||'':''||substr(LPAD(RPAD(post_time,8,0),9,0),5,2) else 
+			substr(POST_TIME,1,2)||'':''|| substr(POST_TIME,3,2)||'':''||substr(POST_TIME,5,2) end||''''||
+			(SELECT SESSIONTIMEZONE FROM DUAL where rownum < 2)  as TRAN_DATE, decode(POST_DATE,0,''0'',to_char(TO_DATE((2415020 + POST_DATE), ''J''),''YYYY-MM-DD''))||'' ''||
+			case when length(trim(post_time)) between 3 and 7 then 
+			substr(LPAD(RPAD(post_time,8,0),9,0),1,2)||'':''|| substr(LPAD(RPAD(post_time,8,0),9,0),3,2)||'':''||substr(LPAD(RPAD(post_time,8,0),9,0),5,2) else 
+			substr(POST_TIME,1,2)||'':''|| substr(POST_TIME,3,2)||'':''||substr(POST_TIME,5,2) end||''''||
+			(SELECT SESSIONTIMEZONE FROM DUAL where rownum < 2) as VALUEDATE, JRNL_NO reference 
+			from inct t
+			where inst_no = ''003''
+			and acct_no = ?
+			and tran_date between to_char(to_date(?,''YYYY-MM-DD''),''J'')-2415020  and to_char(to_date(?,''YYYY-MM-DD''),''J'')-2415020
+			and tran_type in (''01'',''80'')' TO Database.{DSN2} VALUES(Acc_number, fromDate, toDate ));
+			 			 
+					-------------Profile part ----------- ------------------ 
+		           	 
+		IF CARDINALITY(Profile_summary.C.CUST_NAME[])= 1 THEN 
+			SET OutputRoot.JSON.Data.status = 'success';
+			SET OutputRoot.JSON.Data.bankcode = bankname.C.BANK_CODE;			 
+			SET OutputRoot.JSON.Data.data.Account.type = 'deposit';
+			
+			SET OutputRoot.JSON.Data.data.Account.Profile.Holders.type = Profile_summary.C.HOLDER_TYPE;
+			
+			CREATE FIELD OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder IDENTITY(JSON.Array);  
+
+			DECLARE count INT CARDINALITY(Profile_summary.C[]);
+			DECLARE i INT 1;
+
+			WHILE i <= count DO
+				
+			    SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].name = Profile_summary.C[i].CUST_NAME;
+			    SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].dob = Profile_summary.C[i].DOB;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].mobile = Profile_summary.C[i].MOB_NO;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].nominee= Profile_summary.C[i].NOMINEE;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].email = Profile_summary.C[i].EMAIL_1;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].pan = Profile_summary.C[i].PAN;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].ckycCompliance = Profile_summary.C[i].CKYCCOMPLIANCE;
+				SET i = i + 1;
+			END WHILE; 
+			 
+	                
+	       	        ----------------------summary part ----------------------- 
+			SET OutputRoot.JSON.Data.data.Account.summary.CurrentBalance = Profile_summary.C.CURRENTBALANCE;
+			SET OutputRoot.JSON.Data.data.Account.summary.Currency = Profile_summary.C.CURRENCY;
+			SET OutputRoot.JSON.Data.data.Account.summary.ExchgeRate = Profile_summary.C.EXCHGERATE;
+			SET OutputRoot.JSON.Data.data.Account.summary.BalanceDateTime = Profile_summary.C.BALANCEDATETIME;
+			SET OutputRoot.JSON.Data.data.Account.summary.Type = Profile_summary.C.TYPE;
+			SET OutputRoot.JSON.Data.data.Account.summary.Branch = Profile_summary.C.BRANCH_NO;
+			SET OutputRoot.JSON.Data.data.Account.summary.Facility = Profile_summary.C.FACILITY;
+			SET OutputRoot.JSON.Data.data.Account.summary.IfscCode = Profile_summary.C.IFSC_CODE;
+			SET OutputRoot.JSON.Data.data.Account.summary.MicrCode = Profile_summary.C.MICR_CODE;
+			SET OutputRoot.JSON.Data.data.Account.summary.OpeningDate = Profile_summary.C.OPENING_DATE;
+			
+			DECLARE C_OD_LIMIT REFERENCE TO Profile_summary;
+			DECLARE currentODLimit DECIMAL;
+			SET currentODLimit =CAST(FIELDVALUE(C_OD_LIMIT.C[i].CURRENTODLIMIT) AS DECIMAL); 
+			 
+			SET OutputRoot.JSON.Data.data.Account.summary.CurrentODLimit = currentODLimit;
+			SET OutputRoot.JSON.Data.data.Account.summary.DrawingLimit = Profile_summary.C.DRAWING_AMOUNT;
+			SET OutputRoot.JSON.Data.data.Account.summary.Status = Profile_summary.C.DRAWING_AMOUNT;
+			SET OutputRoot.JSON.Data.data.Account.summary.Pending.amount = Profile_summary.C.PENDING_AMOUNT;
+			
+				---------------------Transactions -------------------------------------- 
+			SET OutputRoot.JSON.Data.data.Account.Transactions.startDate = fromDate;
+			SET OutputRoot.JSON.Data.data.Account.Transactions.endDate = toDate;
+			
+			CREATE FIELD OutputRoot.JSON.Data.data.Account.Transactions.Transaction IDENTITY(JSON.Array);
+			
+			
+			
+			SET itaration_value = CARDINALITY(Transactions.B[]);
+			
+			IF itaration_value = 0 THEN
+					SET OutputRoot.JSON.Data.Responce = 'No Transactions Found';
+			ELSE
+				
+				DECLARE Amountint REFERENCE TO Transactions;
+			 				DECLARE Amount DECIMAL;
+			 				DECLARE currentBalance DECIMAL;
+			 				SET i = 1;
+				WHILE i<= itaration_value DO
+			 	
+			 
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].txnId = Transactions.B[i].JRNL_NO;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].type = Transactions.B[i].TRAN_TYPE;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].mode = Transactions.B[i].MODE_OF_TRAN;
+						 
+						
+			 				SET Amount =CAST(FIELDVALUE(Amountint.B[i].AMOUNT) AS DECIMAL);   
+			 				SET currentBalance = CAST(FIELDVALUE(Amountint.B[i].BALANCE) AS DECIMAL);
+			 				
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].amount = Amount; 
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].currentBalance = currentBalance;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].transactionTimestamp = Transactions.B[i].TRAN_DATE;
+						SET Environment.valuedate = SUBSTRING(Transactions.B[i].TRAN_DATE BEFORE ' ');
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].valueDate = Environment.valuedate;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].narration = Transactions.B[i].NARRATION;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].reference = Transactions.B[i].REFERENCE;
+						SET i = i + 1;
+				END WHILE;
+			
+			END IF;
+		ELSE
+					SET OutputRoot.JSON.Data.Responce = 'No Data Found';	
+						
+		END IF;
+			
+		
+			 
+			
+			DECLARE resp_payload CHARACTER CAST(ASBITSTREAM(OutputRoot.JSON.Data CCSID InputRoot.Properties.CodedCharSetId ENCODING InputRoot.Properties.Encoding)AS CHARACTER CCSID InputRoot.Properties.CodedCharSetId ENCODING InputRoot.Properties.Encoding);
+			CALL log4j_1_1('FI_DATA_FETCH', 'FI_DATA_FETCH', 'INFO','----------------start logging --------------------') INTO rc;
+			CALL log4j_1_1('FI_DATA_FETCH', 'FI_DATA_FETCH', 'INFO','Request data:'||payload||','||'BANK code:'||bankname.C.BANK_CODE||','||'DSN:'||bankname.C.DSN||','||'data fetch from the database:' ||resp_payload||','||'LogRef:'||Reference_log) INTO rc;
+
+--			CALL log4j_1_1('FI_DATA_FETCH', 'FI_DATA_FETCH', 'INFO','data fetch from the database:' ||resp_payload) INTO rc;
+			CALL log4j_1_1('FI_DATA_FETCH', 'FI_DATA_FETCH', 'INFO','------------------end logging---------------') INTO rc;
+	---------------------------------------------------------------------------------------------------------------------------------------------------------------------		
+	---------------------------------------------------------Term_deposit -----------------------------------------------------------------------------------------------
+	---------------------------------------------------------------------------------------------------------------------------------------------------------------------	
+			ELSEIF CONTAINS(inurl , 'td') THEN  
+			
+		SET query = 'SELECT /*+ parallel (AUTO, INVM) */
+										''SELF'' AS HOLDER_TYPE,
+										(SELECT TRIM(NAME1) || '' '' || TRIM(mid_name) || '' '' || TRIM(NAME2)
+										FROM cusvaa
+										WHERE cust_no = i.customer_no AND effe_date = 0) AS Cust_Name,
+										(SELECT DECODE(BIRTH_DATE_1, ''0'', ''0'', TO_CHAR(BIRTH_DATE_1 + TO_DATE(''31-DEC-1899'', ''DD-MON-YYYY''), ''DD/MM/YYYY''))
+										FROM cusvdd
+										WHERE customer_no = SUBSTR(key_1, 4, 16) AND key_1 LIKE ''003%'' AND ROWNUM < 2) AS DOB,
+										(SELECT TRIM(telex_no)
+										FROM cusvaa
+										WHERE cust_no = i.customer_no AND effe_date = 0 AND LENGTH(TRIM(telex_no)) = ''10'') AS MOB_NO,
+										''NOT-REGISTERED'' AS Nominee,
+										(SELECT EMAIL_ADD1
+										FROM cumi
+										WHERE cust_no = i.customer_no AND ROWNUM < 2) AS EMAIL_1,
+										(SELECT cust_tax_pan
+										FROM cusm
+										WHERE cust_acct_no = i.customer_no AND ROWNUM < 2) AS PAN,
+										''TRUE'' AS ckyccompliance,
+										CURR_BAL AS CurrentBalance,
+										''INR'' AS currency,
+										'' '' AS exchgeRate,
+										(SELECT CURRENT_DATE || '''' || SESSIONTIMEZONE FROM DUAL WHERE ROWNUM < 2) AS balancedatetime,
+										CASE
+										WHEN acct_type LIKE ''1%'' THEN ''SAVINGS''
+										WHEN acct_type LIKE ''5%'' THEN ''CURRENT''
+										END AS type,
+										branch_no,
+										CASE
+										WHEN acct_type LIKE ''5%'' THEN ''CC''
+										ELSE '' ''
+										END AS facility,
+										(CASE
+									WHEN ? IN (''APGB'', ''ARGB'') THEN
+										(SELECT IFSC_CODE FROM ifsc WHERE branch_no = BRANCH_CODE AND TRIM(BANK_CODE) = ''000'')
+									ELSE
+										(SELECT IFSC_CODE FROM ifsc WHERE BRANCH_CODE = ''99922'' AND ROWNUM < 2)
+										END) AS IFSC_CODE,
+										(SELECT MICR_CODE FROM brhm WHERE ''00300000000000'' || branch_no = key_1) AS MICR_CODE,
+										TO_CHAR(ACCT_OPEN_DT + TO_DATE(''31-DEC-1899'', ''DD-MON-YYYY''), ''DD-MON-YYYY'') AS Opening_date,
+										'' '' AS CurrentODLimit,
+										DRAWING_AMOUNT,
+										DECODE(curr_status,
+										''00'', ''ACTIVE'',
+										''01'', ''DORMANT'',
+										''02'', ''DORMANT UNCLAIMED'',
+										''03'', ''INOPERATIVE'',
+										''07'', ''CLOSED'',
+										''11'', ''INACTIVE'',
+										''12'', ''IRREGULAR'',
+										''14'', ''MATURED'') AS STATUS,
+										''0'' AS Pending_amount
+										FROM INVM i
+										WHERE curr_status <> ''07''
+										AND key_1 = ''003'' || ?
+										AND (key_1 NOT IN (SELECT /*+ parallel (AUTO, RELM) */ SUBSTR(key_1, 1, 19)
+										FROM relm
+										WHERE SUBSTR(key_1, 23, 4) = ''0029'')
+										OR key_1 NOT IN (SELECT /*+ parallel (AUTO, RELM) */ SUBSTR(key_1, 27, 19)
+										FROM relm
+										WHERE SUBSTR(key_1, 23, 4) = ''0029''));
+										';
+			 
+			
+				----------Profile part --------------------------			
+			SET Profile.TD[] = PASSTHRU(query TO Database.{DSN2} VALUES(bankname.C.BANK_CODE,Acc_number));
+			
+			SET OutputRoot.JSON.Data.status = 'success';
+			SET OutputRoot.JSON.Data.bankcode = bankname.C.BANK_CODE;
+			SET OutputRoot.JSON.Data.data.Account.type = 'term_deposit';
+			
+			
+			SET OutputRoot.JSON.Data.data.Account.Profile.Holders.type = Profile.TD.HOLDER_TYPE;
+			
+			CREATE FIELD OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder IDENTITY(JSON.Array);  
+
+			DECLARE count INT CARDINALITY(Profile.TD[]);
+			DECLARE i INT 1;
+
+			WHILE i <= count DO
+				
+			    SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].name = Profile.TD[i].CUST_NAME;
+			    SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].dob = Profile.TD[i].DOB;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].mobile = Profile.TD[i].MOB_NO;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].nominee= Profile.TD[i].NOMINEE;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].email = Profile.TD[i].EMAIL_1;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].pan = Profile.TD[i].PAN;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].ckycCompliance = Profile.TD[i].CKYCCOMPLIANCE;
+				SET i = i + 1;
+			END WHILE; 
+			
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holders.type = Profile.TD.HOLDER_TYPE;
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holder.name = Profile.TD.CUST_NAME;
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holder.dob = Profile.TD.DOB;
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holder.mobile = Profile.TD.MOB_NO;
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holder.nominee= Profile.TD.NOMINEE;
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holder.email = Profile.TD.EMAIL_1;		
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holder.pan = Profile.TD.PAN;
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holder.ckycCompliance = Profile.TD.CKYCCOMPLIANCE;
+		------------------------------------------------Transaction------------------------
+		 DECLARE fromDate CHARACTER;
+			        DECLARE toDate CHARACTER;
+			       
+			        DECLARE itaration_value CHARACTER;
+			SET fromDate = SUBSTRING(inref.fromDate BEFORE 'T');
+			SET toDate = SUBSTRING(inref.toDate BEFORE 'T');
+		SET Transactions.B[] = PASSTHRU('select /*+  INDEX(inct,INCTUK_04) */ JRNL_NO,abs(BASECONV.CONVDATA(t.VAR_AREA,33,8,3)) amount,
+			
+			(select TRIM(TEXT) from txop where key_1 = ''003''||lpad(BASECONV.CONVDATA(VAR_AREA,17,4),6,''0'')||''TCSH01'') Narration,
+			case when BASECONV.CONVDATA(t.VAR_AREA,33,8,3) > 0 then ''CREDIT'' else ''DEBIT'' END AS tran_type,
+			''CASH'' mode_of_Tran,
+			BASECONV.CONVDATA(t.VAR_AREA,41,8,3) Balance, decode(TRAN_DATE,0,''0'',to_char(TO_DATE((2415020 + TRAN_DATE), ''J''),''YYYY-MM-DD''))||'' ''||
+			case when length(trim(post_time)) between 3 and 7 then 
+			substr(LPAD(RPAD(post_time,8,0),9,0),1,2)||'':''|| substr(LPAD(RPAD(post_time,8,0),9,0),3,2)||'':''||substr(LPAD(RPAD(post_time,8,0),9,0),5,2) else 
+			substr(POST_TIME,1,2)||'':''|| substr(POST_TIME,3,2)||'':''||substr(POST_TIME,5,2) end||''''||
+			(SELECT SESSIONTIMEZONE FROM DUAL where rownum < 2)  as TRAN_DATE, decode(POST_DATE,0,''0'',to_char(TO_DATE((2415020 + POST_DATE), ''J''),''YYYY-MM-DD''))||'' ''||
+			case when length(trim(post_time)) between 3 and 7 then 
+			substr(LPAD(RPAD(post_time,8,0),9,0),1,2)||'':''|| substr(LPAD(RPAD(post_time,8,0),9,0),3,2)||'':''||substr(LPAD(RPAD(post_time,8,0),9,0),5,2) else 
+			substr(POST_TIME,1,2)||'':''|| substr(POST_TIME,3,2)||'':''||substr(POST_TIME,5,2) end||''''||
+			(SELECT SESSIONTIMEZONE FROM DUAL where rownum < 2) as VALUEDATE, JRNL_NO reference 
+			from inct t
+			where inst_no = ''003''
+			and acct_no = ?
+			and tran_date between to_char(to_date(?,''YYYY-MM-DD''),''J'')-2415020  and to_char(to_date(?,''YYYY-MM-DD''),''J'')-2415020
+			and tran_type in (''01'',''80'')' TO Database.{DSN2} VALUES(Acc_number, fromDate, toDate ));
+			
+			SET OutputRoot.JSON.Data.data.Account.Transactions.startDate = fromDate;
+			SET OutputRoot.JSON.Data.data.Account.Transactions.endDate = toDate;
+			CREATE FIELD OutputRoot.JSON.Data.data.Account.Transactions.Transaction IDENTITY(JSON.Array);
+		SET itaration_value = CARDINALITY(Transactions.B[]);
+			
+			IF itaration_value = 0 THEN
+					SET OutputRoot.JSON.Data.Responce = 'No Transactions Found';
+			ELSE
+				
+				DECLARE Amountint REFERENCE TO Transactions;
+			 				DECLARE Amount DECIMAL;
+			 				DECLARE currentBalance DECIMAL;
+			 				SET i = 1;
+				WHILE i<= itaration_value DO
+			 	
+			 
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].txnId = Transactions.B[i].JRNL_NO;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].type = Transactions.B[i].TRAN_TYPE;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].mode = Transactions.B[i].MODE_OF_TRAN;
+						 
+						
+			 				SET Amount =CAST(FIELDVALUE(Amountint.B[i].AMOUNT) AS DECIMAL);   
+			 				SET currentBalance = CAST(FIELDVALUE(Amountint.B[i].BALANCE) AS DECIMAL);
+			 				
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].amount = Amount; 
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].currentBalance = currentBalance;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].transactionTimestamp = Transactions.B[i].TRAN_DATE;
+						SET Environment.valuedate = SUBSTRING(Transactions.B[i].TRAN_DATE BEFORE ' ');
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].valueDate = Environment.valuedate;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].narration = Transactions.B[i].NARRATION;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].reference = Transactions.B[i].REFERENCE;
+						SET i = i + 1;
+				END WHILE;
+				
+						
+		      END IF;
+			
+	ELSEIF CONTAINS(inurl , 'rd') THEN 
+				SET query = 'SELECT /*+ parallel (AUTO, INVM) */
+										''SELF'' AS HOLDER_TYPE,
+										(SELECT TRIM(NAME1) || '' '' || TRIM(mid_name) || '' '' || TRIM(NAME2)
+										FROM cusvaa
+										WHERE cust_no = i.customer_no AND effe_date = 0) AS Cust_Name,
+										(SELECT DECODE(BIRTH_DATE_1, ''0'', ''0'', TO_CHAR(BIRTH_DATE_1 + TO_DATE(''31-DEC-1899'', ''DD-MON-YYYY''), ''DD/MM/YYYY''))
+										FROM cusvdd
+										WHERE customer_no = SUBSTR(key_1, 4, 16) AND key_1 LIKE ''003%'' AND ROWNUM < 2) AS DOB,
+										(SELECT TRIM(telex_no)
+										FROM cusvaa
+										WHERE cust_no = i.customer_no AND effe_date = 0 AND LENGTH(TRIM(telex_no)) = ''10'') AS MOB_NO,
+										''NOT-REGISTERED'' AS Nominee,
+										(SELECT EMAIL_ADD1
+										FROM cumi
+										WHERE cust_no = i.customer_no AND ROWNUM < 2) AS EMAIL_1,
+										(SELECT cust_tax_pan
+										FROM cusm
+										WHERE cust_acct_no = i.customer_no AND ROWNUM < 2) AS PAN,
+										''TRUE'' AS ckyccompliance,
+										''REGULAR'' AS Acct_type,
+										branch_no,
+										CASE
+										WHEN (SELECT TERM_INT_FREQUENCY FROM depp d WHERE i.acct_type || i.int_cat = d.type || d.int_cat) IN (''M'', ''1A'', ''1M'') THEN ''MONTHLY''
+										WHEN (SELECT TERM_INT_FREQUENCY FROM depp d WHERE i.acct_type || i.int_cat = d.type || d.int_cat) IN (''3M'', ''3A'') THEN ''QUARTERLY''
+										WHEN (SELECT TERM_INT_FREQUENCY FROM depp d WHERE i.acct_type || i.int_cat = d.type || d.int_cat) IN (''6M'', ''6Y'', ''6A'') THEN ''HALF YEARLY''
+										WHEN (SELECT TERM_INT_FREQUENCY FROM depp d WHERE i.acct_type || i.int_cat = d.type || d.int_cat) IN (''A'', ''YA'') THEN ''YEARLY''
+										ELSE ''OTHERS''
+										END AS compoundingFrequency,
+										''INR'' AS currency,
+										CURR_BAL,
+										(SELECT descript
+										FROM depp d
+										WHERE i.acct_type || i.int_cat = d.type || d.int_cat AND ROWNUM < 2) AS descript,
+										(CASE
+									WHEN ? IN (''APGB'', ''ARGB'') THEN
+										(SELECT IFSC_CODE FROM ifsc WHERE branch_no = BRANCH_CODE AND TRIM(BANK_CODE) = ''000'')
+									ELSE
+										(SELECT IFSC_CODE FROM ifsc WHERE BRANCH_CODE = ''99922'' AND ROWNUM < 2)
+										END) AS IFSC_CODE,
+										CASE
+										WHEN TERM_INT_COMP_FREQ = ''3A'' THEN ''COMPOUND''
+										WHEN TERM_INT_COMP_FREQ = ''C'' THEN ''SIMPLE''
+										ELSE ''Others''
+										END AS interestComputation,
+										(BASECONV.CONVDATA(OD_VISA_AREA, 53, 8) / 1000 - BASECONV.CONVDATA(OD_VISA_AREA, 31, 8) / 1000) AS interestonmaturity,
+										CASE
+										WHEN TERM_PAY_FREQUENCY IN (''3M'', ''3A'') THEN ''QUARTERLY''
+										WHEN TERM_PAY_FREQUENCY IN (''6M'', ''6A'') THEN ''HALF YEARLY''
+										WHEN TERM_PAY_FREQUENCY IN (''YA'', ''Y'') THEN ''YEARLY''
+										WHEN TERM_PAY_FREQUENCY IN (''1M'', ''1A'') THEN ''MONTHLY''
+										WHEN TERM_PAY_FREQUENCY = ''M'' THEN ''MATURITY''
+										ELSE ''OTHERS''
+										END AS interestPayout,
+										INT_AVAILABLE AS interestPeriodicPayoutAmount,
+										VAR_INT_RATE AS Interest_Rate,
+										BASECONV.CONVDATA(OD_VISA_AREA, 53, 8) / 1000 AS mat_amt,
+										DECODE(BASECONV.CONVDATA(OD_VISA_AREA, 19, 4), ''0'', ''0'', BASECONV.CONVDATA(OD_VISA_AREA, 19, 4) + TO_DATE(''31-DEC-1899'', ''DD-MON-YYYY'')) AS mat_dt,
+										TO_CHAR(ACCT_OPEN_DT + TO_DATE(''31-DEC-1899'', ''DD-MON-YYYY''), ''DD-MON-YYYY'') AS OpeningDate,
+										BASECONV.CONVDATA(OD_VISA_AREA, 31, 8) / 1000 AS prin_amt,
+										CASE
+										WHEN TO_NUMBER(BASECONV.CONVDATA(VAR_AREA, 33, 8, 3)) < 0 THEN 0
+										ELSE BASECONV.CONVDATA(VAR_AREA, 33, 8, 3)
+										END AS RECURR_AMT,
+										TO_CHAR(TRAN_DATE + TO_DATE(''31-DEC-1899'', ''DD-MON-YYYY''), ''DD'') AS RECURR_DATE,
+										BASECONV.CONVDATA(OD_VISA_AREA, 47, 2) AS tenureDays,
+										BASECONV.CONVDATA(OD_VISA_AREA, 49, 2) AS tenuremonths,
+										BASECONV.CONVDATA(OD_VISA_AREA, 51, 2) AS tenureyears
+										FROM INVM i, inct t
+										WHERE t.inst_no = ''003''
+										AND tran_type = ''1''
+										AND SUBSTR(key_1, 4, 16) = t.acct_no
+										AND i.acct_type LIKE ''28%''
+										AND curr_status <> ''07''
+										AND key_1 = ''003'' || ?
+										AND (key_1 NOT IN (SELECT /*+ parallel (AUTO, RELM) */ SUBSTR(key_1, 1, 19)
+										FROM relm
+										WHERE SUBSTR(key_1, 23, 4) = ''0029'')
+										OR key_1 NOT IN (SELECT /*+ parallel (AUTO, RELM) */ SUBSTR(key_1, 27, 19)
+										FROM relm
+										WHERE SUBSTR(key_1, 23, 4) = ''0029''))
+										FETCH FIRST 1 ROWS ONLY;
+										';
+										
+										SET Profile.RD[] = PASSTHRU(query TO Database.{DSN2} VALUES(bankname.C.BANK_CODE,Acc_number));
+			SET OutputRoot.JSON.Data.status = 'success';
+			SET OutputRoot.JSON.Data.bankcode = bankname.C.BANK_CODE;
+			SET OutputRoot.JSON.Data.data.Account.type = 'recurring_deposit';
+			
+			
+			SET OutputRoot.JSON.Data.data.Account.Profile.Holders.type = Profile.RD.HOLDER_TYPE;
+			
+			CREATE FIELD OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder IDENTITY(JSON.Array);  
+
+			DECLARE count INT CARDINALITY(Profile.RD[]);
+			DECLARE i INT 1;
+
+			WHILE i <= count DO
+				
+			    SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].name = Profile.RD[i].CUST_NAME;
+			    SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].dob = Profile.RD[i].DOB;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].mobile = Profile.RD[i].MOB_NO;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].nominee= Profile.RD[i].NOMINEE;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].email = Profile.RD[i].EMAIL_1;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].pan = Profile.RD[i].PAN;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].ckycCompliance = Profile.RD[i].CKYCCOMPLIANCE;
+				SET i = i + 1;
+			END WHILE; 
+			
+			SET OutputRoot.JSON.Data.data.Account.Profile.Holders.type = Profile.RD.HOLDER_TYPE;
+		    SET OutputRoot.JSON.Data.data.Account.Profile.Holder.name = Profile.RD.CUST_NAME;
+	    SET OutputRoot.JSON.Data.data.Account.Profile.Holder.dob = Profile.RD.DOB;
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holder.mobile = Profile.RD.MOB_NO;
+					SET OutputRoot.JSON.Data.data.Account.Profile.Holder.nominee= Profile.RD.NOMINEE;
+			SET OutputRoot.JSON.Data.data.Account.Profile.Holder.email = Profile.RD.EMAIL_1;
+		SET OutputRoot.JSON.Data.data.Account.Profile.Holder.pan = Profile.RD.PAN;
+			SET OutputRoot.JSON.Data.data.Account.Profile.Holder.ckycCompliance = Profile.RD.CKYCCOMPLIANCE;
+			
+			 DECLARE fromDate CHARACTER;
+			 DECLARE toDate CHARACTER;
+			       
+		    DECLARE itaration_value CHARACTER;
+			SET fromDate = SUBSTRING(inref.fromDate BEFORE 'T');
+			SET toDate = SUBSTRING(inref.toDate BEFORE 'T');
+			
+			SET Transactions.C[] = PASSTHRU('select /*+  INDEX(inct,INCTUK_04) */ JRNL_NO,abs(BASECONV.CONVDATA(t.VAR_AREA,33,8,3)) amount,
+			
+			(select TRIM(TEXT) from txop where key_1 = ''003''||lpad(BASECONV.CONVDATA(VAR_AREA,17,4),6,''0'')||''TCSH01'') Narration,
+			case when BASECONV.CONVDATA(t.VAR_AREA,33,8,3) > 0 then ''CREDIT'' else ''DEBIT'' END AS tran_type,
+			''CASH'' mode_of_Tran,
+			BASECONV.CONVDATA(t.VAR_AREA,41,8,3) Balance, decode(TRAN_DATE,0,''0'',to_char(TO_DATE((2415020 + TRAN_DATE), ''J''),''YYYY-MM-DD''))||'' ''||
+			case when length(trim(post_time)) between 3 and 7 then 
+			substr(LPAD(RPAD(post_time,8,0),9,0),1,2)||'':''|| substr(LPAD(RPAD(post_time,8,0),9,0),3,2)||'':''||substr(LPAD(RPAD(post_time,8,0),9,0),5,2) else 
+			substr(POST_TIME,1,2)||'':''|| substr(POST_TIME,3,2)||'':''||substr(POST_TIME,5,2) end||''''||
+			(SELECT SESSIONTIMEZONE FROM DUAL where rownum < 2)  as TRAN_DATE, decode(POST_DATE,0,''0'',to_char(TO_DATE((2415020 + POST_DATE), ''J''),''YYYY-MM-DD''))||'' ''||
+			case when length(trim(post_time)) between 3 and 7 then 
+			substr(LPAD(RPAD(post_time,8,0),9,0),1,2)||'':''|| substr(LPAD(RPAD(post_time,8,0),9,0),3,2)||'':''||substr(LPAD(RPAD(post_time,8,0),9,0),5,2) else 
+			substr(POST_TIME,1,2)||'':''|| substr(POST_TIME,3,2)||'':''||substr(POST_TIME,5,2) end||''''||
+			(SELECT SESSIONTIMEZONE FROM DUAL where rownum < 2) as VALUEDATE, JRNL_NO reference 
+			from inct t
+			where inst_no = ''003''
+			and acct_no = ?
+			and tran_date between to_char(to_date(?,''YYYY-MM-DD''),''J'')-2415020  and to_char(to_date(?,''YYYY-MM-DD''),''J'')-2415020
+			and tran_type in (''01'',''80'')' TO Database.{DSN2} VALUES(Acc_number, fromDate, toDate ));
+			
+			
+			SET OutputRoot.JSON.Data.data.Account.Transactions.startDate = fromDate;
+			SET OutputRoot.JSON.Data.data.Account.Transactions.endDate = toDate;
+			CREATE FIELD OutputRoot.JSON.Data.data.Account.Transactions.Transaction IDENTITY(JSON.Array);
+			
+			
+			SET itaration_value = CARDINALITY(Transactions.C[]);
+			
+			IF(itaration_value=0)THEN
+			 SET OutputRoot.JSON.Data.Responce = 'No Transactions Found';
+			END IF;
+			
+			DECLARE Amountint REFERENCE TO Transactions;
+			 				DECLARE Amount DECIMAL;
+			 				DECLARE currentBalance DECIMAL;
+			 				SET i = 1;
+			
+			
+			WHILE i<= itaration_value DO
+			 	
+			 
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].txnId = Transactions.C[i].JRNL_NO;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].type = Transactions.C[i].TRAN_TYPE;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].mode = Transactions.C[i].MODE_OF_TRAN;
+						 
+						
+			 				SET Amount =CAST(FIELDVALUE(Amountint.B[i].AMOUNT) AS DECIMAL);   
+			 				SET currentBalance = CAST(FIELDVALUE(Amountint.B[i].BALANCE) AS DECIMAL);
+			 				
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].amount = Amount; 
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].currentBalance = currentBalance;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].transactionTimestamp = Transactions.C[i].TRAN_DATE;
+						SET Environment.valuedate = SUBSTRING(Transactions.B[i].TRAN_DATE BEFORE ' ');
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].valueDate = Environment.valuedate;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].narration = Transactions.C[i].NARRATION;
+						SET OutputRoot.JSON.Data.data.Account.Transactions.Transaction.A[i].reference = Transactions.[i].REFERENCE;
+						SET i = i + 1;
+				END WHILE;
+			
+								
+										
+ELSE
+	/*------------------------------------------------------------------------------------------------------------------------------------------						
+	---------------------------Recurring_deposit ---------------------------------------------------------------------------------------------
+	------------------------------------------------------------------------------------------------------------------------------------------
+			 ----------Profile part ---------------------------	
+			SET Profile.RD[] = PASSTHRU(query TO Database.{DSN2} VALUES(Acc_number));
+			SET OutputRoot.JSON.Data.status = 'success';
+			SET OutputRoot.JSON.Data.bankcode = bankname.C.BANK_CODE;
+			SET OutputRoot.JSON.Data.data.Account.type = 'recurring_deposit';
+			
+			
+			SET OutputRoot.JSON.Data.data.Account.Profile.Holders.type = Profile.RD.HOLDER_TYPE;
+			
+			CREATE FIELD OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder IDENTITY(JSON.Array);  
+
+			DECLARE count INT CARDINALITY(Profile.RD[]);
+			DECLARE i INT 1;
+
+			WHILE i <= count DO
+				
+			    SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].name = Profile.RD[i].CUST_NAME;
+			    SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].dob = Profile.RD[i].DOB;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].mobile = Profile.RD[i].MOB_NO;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].nominee= Profile.RD[i].NOMINEE;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].email = Profile.RD[i].EMAIL_1;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].pan = Profile.RD[i].PAN;
+				SET OutputRoot.JSON.Data.data.Account.Profile.Holders.Holder.A[i].ckycCompliance = Profile.RD[i].CKYCCOMPLIANCE;
+				SET i = i + 1;
+			END WHILE; 
+			
+--			SET OutputRoot.JSON.Data.data.Account.Profile.Holders.type = Profile.RD.HOLDER_TYPE;
+--		    SET OutputRoot.JSON.Data.data.Account.Profile.Holder.name = Profile.RD.CUST_NAME;
+--		    SET OutputRoot.JSON.Data.data.Account.Profile.Holder.dob = Profile.RD.DOB;
+--			SET OutputRoot.JSON.Data.data.Account.Profile.Holder.mobile = Profile.RD.MOB_NO;
+--			SET OutputRoot.JSON.Data.data.Account.Profile.Holder.nominee= Profile.RD.NOMINEE;
+--			SET OutputRoot.JSON.Data.data.Account.Profile.Holder.email = Profile.RD.EMAIL_1;
+--			SET OutputRoot.JSON.Data.data.Account.Profile.Holder.pan = Profile.RD.PAN;
+--			SET OutputRoot.JSON.Data.data.Account.Profile.Holder.ckycCompliance = Profile.RD.CKYCCOMPLIANCE;
+--			
+			*/
+			SET OutputRoot.JSON.Data.Responce = 'Invalid Account Indentifer';
+				
+		END IF;
+
+	END;
+END MODULE;
+recurring_deposit
+{
+    "status": "success",
+    "bankcode": "APGVB",
+    "data": {
+        "Account": {
+            "type": "recurring_deposit",
+            "Profile": {
+                "Holders": {
+                    "type": "SELF",
+                    "Holder": [
+                        {
+                            "name": "CHANDENO YANTHAN  .",
+                            "dob": "24/01/1990",
+                            "mobile": "7989571232",
+                            "nominee": "NOT-REGISTERED",
+                            "email": null,
+                            "pan": "AOIPY8189C          ",
+                            "ckycCompliance": "TRUE"
+                        }
+                    ]
+                },
+                "Holder": {
+                    "name": "CHANDENO YANTHAN  .",
+                    "dob": "24/01/1990",
+                    "mobile": "7989571232",
+                    "nominee": "NOT-REGISTERED",
+                    "email": null,
+                    "pan": "AOIPY8189C          ",
+                    "ckycCompliance": "TRUE"
+                }
+            },
+            "Transactions": {
+                "startDate": "2023-01-01",
+                "endDate": "2023-12-31",
+                "Transaction": []
+            }
+        }
+    },
+    "Responce": "No Transactions Found"
+}
+DEPOSIST
+
+{
+    "status": "success",
+    "bankcode": "APGVB",
+    "data": {
+        "Account": {
+            "type": "deposit",
+            "Profile": {
+                "Holders": {
+                    "type": "SELF",
+                    "Holder": [
+                        {
+                            "name": "RAHUL D SANGMA  .",
+                            "dob": "01/07/1979",
+                            "mobile": "7989571232",
+                            "nominee": "NOT-REGISTERED",
+                            "email": "                                                  ",
+                            "pan": "RJPS0577R           ",
+                            "ckycCompliance": "TRUE"
+                        }
+                    ]
+                }
+            },
+            "summary": {
+                "CurrentBalance": 10181.000,
+                "Currency": "INR",
+                "ExchgeRate": " ",
+                "BalanceDateTime": "11-MAR-2025 22:00:23+05:30",
+                "Type": "SAVINGS",
+                "Branch": "00011",
+                "Facility": " ",
+                "IfscCode": "SBIN0RRNLGB",
+                "MicrCode": "797804003",
+                "OpeningDate": "25-FEB-2011",
+                "DrawingLimit": 0,
+                "Status": 0,
+                "Pending": {
+                    "amount": "0"
+                }
+            },
+            "Transactions": {
+                "startDate": "2023-01-01",
+                "endDate": "2023-12-31",
+                "Transaction": [
+                    {
+                        "txnId": 906253196,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 21,
+                        "currentBalance": 1667,
+                        "transactionTimestamp": "2023-12-31 53:89:76+05:30",
+                        "valueDate": "2023-12-31",
+                        "narration": "SMS CHARGES",
+                        "reference": 906253196
+                    },
+                    {
+                        "txnId": 906253196,
+                        "type": "CREDIT",
+                        "mode": "CASH",
+                        "amount": 97,
+                        "currentBalance": 1688,
+                        "transactionTimestamp": "2023-12-31 18:54:07+05:30",
+                        "valueDate": "2023-12-31",
+                        "narration": "CREDIT INTEREST",
+                        "reference": 906253196
+                    },
+                    {
+                        "txnId": 1592,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 9000,
+                        "currentBalance": 1591,
+                        "transactionTimestamp": "2023-10-21 10:56:08+05:30",
+                        "valueDate": "2023-10-21",
+                        "narration": "To Cash",
+                        "reference": 1592
+                    },
+                    {
+                        "txnId": 906250004,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 21,
+                        "currentBalance": 10591,
+                        "transactionTimestamp": "2023-09-30 53:89:76+05:30",
+                        "valueDate": "2023-09-30",
+                        "narration": "SMS CHARGES",
+                        "reference": 906250004
+                    },
+                    {
+                        "txnId": 912501544,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 21,
+                        "currentBalance": 10612,
+                        "transactionTimestamp": "2023-06-30 53:89:76+05:30",
+                        "valueDate": "2023-06-30",
+                        "narration": "SMS CHARGES",
+                        "reference": 912501544
+                    },
+                    {
+                        "txnId": 912501544,
+                        "type": "CREDIT",
+                        "mode": "CASH",
+                        "amount": 24,
+                        "currentBalance": 10633,
+                        "transactionTimestamp": "2023-06-30 21:19:51+05:30",
+                        "valueDate": "2023-06-30",
+                        "narration": "CREDIT INTEREST",
+                        "reference": 912501544
+                    },
+                    {
+                        "txnId": 6355,
+                        "type": "CREDIT",
+                        "mode": "CASH",
+                        "amount": 10000,
+                        "currentBalance": 10609,
+                        "transactionTimestamp": "2023-06-13 15:08:08+05:30",
+                        "valueDate": "2023-06-13",
+                        "narration": "By Cash",
+                        "reference": 6355
+                    },
+                    {
+                        "txnId": 918749998,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 21,
+                        "currentBalance": 609,
+                        "transactionTimestamp": "2023-03-23 53:89:76+05:30",
+                        "valueDate": "2023-03-23",
+                        "narration": "SMS CHARGES",
+                        "reference": 918749998
+                    }
+                ]
+            }
+        }
+    }
+}
+TERM DEPOSIT
+
+{
+    "status": "success",
+    "bankcode": "APGVB",
+    "data": {
+        "Account": {
+            "type": "term_deposit",
+            "Profile": {
+                "Holders": {
+                    "type": "SELF",
+                    "Holder": [
+                        {
+                            "name": "RAHUL D SANGMA  .",
+                            "dob": "01/07/1979",
+                            "mobile": "7989571232",
+                            "nominee": "NOT-REGISTERED",
+                            "email": "                                                  ",
+                            "pan": "RJPS0577R           ",
+                            "ckycCompliance": "TRUE"
+                        }
+                    ]
+                },
+                "Holder": {
+                    "name": "RAHUL D SANGMA  .",
+                    "dob": "01/07/1979",
+                    "mobile": "7989571232",
+                    "nominee": "NOT-REGISTERED",
+                    "email": "                                                  ",
+                    "pan": "RJPS0577R           ",
+                    "ckycCompliance": "TRUE"
+                }
+            },
+            "Transactions": {
+                "startDate": "2023-01-01",
+                "endDate": "2023-12-31",
+                "Transaction": [
+                    {
+                        "txnId": 906253196,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 21,
+                        "currentBalance": 1667,
+                        "transactionTimestamp": "2023-12-31 53:89:76+05:30",
+                        "valueDate": "2023-12-31",
+                        "narration": "SMS CHARGES",
+                        "reference": 906253196
+                    },
+                    {
+                        "txnId": 906253196,
+                        "type": "CREDIT",
+                        "mode": "CASH",
+                        "amount": 97,
+                        "currentBalance": 1688,
+                        "transactionTimestamp": "2023-12-31 18:54:07+05:30",
+                        "valueDate": "2023-12-31",
+                        "narration": "CREDIT INTEREST",
+                        "reference": 906253196
+                    },
+                    {
+                        "txnId": 1592,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 9000,
+                        "currentBalance": 1591,
+                        "transactionTimestamp": "2023-10-21 10:56:08+05:30",
+                        "valueDate": "2023-10-21",
+                        "narration": "To Cash",
+                        "reference": 1592
+                    },
+                    {
+                        "txnId": 906250004,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 21,
+                        "currentBalance": 10591,
+                        "transactionTimestamp": "2023-09-30 53:89:76+05:30",
+                        "valueDate": "2023-09-30",
+                        "narration": "SMS CHARGES",
+                        "reference": 906250004
+                    },
+                    {
+                        "txnId": 912501544,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 21,
+                        "currentBalance": 10612,
+                        "transactionTimestamp": "2023-06-30 53:89:76+05:30",
+                        "valueDate": "2023-06-30",
+                        "narration": "SMS CHARGES",
+                        "reference": 912501544
+                    },
+                    {
+                        "txnId": 912501544,
+                        "type": "CREDIT",
+                        "mode": "CASH",
+                        "amount": 24,
+                        "currentBalance": 10633,
+                        "transactionTimestamp": "2023-06-30 21:19:51+05:30",
+                        "valueDate": "2023-06-30",
+                        "narration": "CREDIT INTEREST",
+                        "reference": 912501544
+                    },
+                    {
+                        "txnId": 6355,
+                        "type": "CREDIT",
+                        "mode": "CASH",
+                        "amount": 10000,
+                        "currentBalance": 10609,
+                        "transactionTimestamp": "2023-06-13 15:08:08+05:30",
+                        "valueDate": "2023-06-13",
+                        "narration": "By Cash",
+                        "reference": 6355
+                    },
+                    {
+                        "txnId": 918749998,
+                        "type": "DEBIT",
+                        "mode": "CASH",
+                        "amount": 21,
+                        "currentBalance": 609,
+                        "transactionTimestamp": "2023-03-23 53:89:76+05:30",
+                        "valueDate": "2023-03-23",
+                        "narration": "SMS CHARGES",
+                        "reference": 918749998
+                    }
+                ]
+            }
+        }
+    }
+}
