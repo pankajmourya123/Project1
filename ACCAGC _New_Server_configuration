@@ -8,7 +8,7 @@ step 5--  sql drivers
 INSTALL IIB /ACE 
 dwonlaod tar file 
 untar it 
-accept linces 
+accept linces  vv
 take mqsimyprofile path and add in .bash_profile(app/IIB.12.0.12.5/ace.12.0.12.5/server/bin/mqsiprofile add this path in .bash_profile and save it then run mqsilist to check that mqsi is running or not)
 why we add in . bash_profile ?
 because when ever a user start teh server the bash_profile file runn and your mqsiprofile commands also automatically get runs (if we don"t then we have manually run mqsiprofile every time when we start server)
