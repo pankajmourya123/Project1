@@ -39,5 +39,12 @@ restart broker
 add 
 EXPORT ODBCINI=/name/finshare/odbc.ini file  path in .bash_profile 
 
+-------------------------------------------------------------------------------------------------------------
+if we your proxy server or changing prorxy server then we will
+step 1--from bar file we will extract all the properties from this bar file of a paerticular application
+step 2--then in this extarcetd property file we will menation your change ip 
+step 3-- again we will overrrider this property file into this bar file 
+
+
 
  
