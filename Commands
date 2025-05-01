@@ -15,6 +15,10 @@ mqsireportproperties IIBUATBRKR -e ACCAGG -o HTTPConnector -a
 
 mqsireportproperties IIBPRODBRKR -b httplistener -o HTTPListener -a
 
+mqsireportproperties Testbrkr -e Exce2 -o HTTPConnector -n port 
+  
+  mqsireportproperties Testbrkr -e Exce2 -o HTTPConnector -r 
+
 mqsichangeproperties IIBUATONEMONEY -e ACCAGG -o ExecutionGroup -n httpNodesUseEmbeddedListener -v true
 
 mqsichangeproperties IIBUATONEMONEY -b httplistener -o HTTPListener -n startListener -v false (while doing eg level http port false)
