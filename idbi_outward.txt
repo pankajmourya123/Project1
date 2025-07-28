@@ -1,590 +1,279 @@
-BROKER SCHEMA com.cedge.idbi.inward.neft
-
-CREATE COMPUTE MODULE DatabaseInsertion
-	DECLARE DSNNAME EXTERNAL CHARACTER;
-	DECLARE SCHEMANAME EXTERNAL CHARACTER;
-	DECLARE BANKCOUNT_TABLENAME EXTERNAL CHARACTER;
-	DECLARE NEFT_IN_TABLENAME EXTERNAL CHARACTER;
-	DECLARE NEFT_MSG_IN_TABLENAME EXTERNAL CHARACTER;
-	DECLARE NEFT_OUT_TABLENAME EXTERNAL CHARACTER;
-	DECLARE NEFT_IN_PAYLOAD_TABLENAME EXTERNAL CHARACTER;
-	DECLARE BANKNAME EXTERNAL CHARACTER;
-	DECLARE PROP_LOC EXTERNAL CHARACTER;
-	DECLARE F27_TABLENAME EXTERNAL CHARACTER;
-	
-	CREATE FUNCTION Main() RETURNS BOOLEAN
-	BEGIN
-		 DECLARE bool BOOLEAN;
-		 CALL CopyMessageHeaders();
-		 SET bool = CopyEntireMessage();
-		RETURN bool;
-	END;
-
-	CREATE PROCEDURE CopyMessageHeaders() BEGIN
-		DECLARE I INTEGER 1;
-		DECLARE J INTEGER;
-		SET J = CARDINALITY(InputRoot.*[]);
-		WHILE I < J DO
-			SET OutputRoot.*[I] = InputRoot.*[I];
-			SET I = I + 1;
-		END WHILE;
-	END;
-
-	CREATE PROCEDURE CopyEntireMessage() RETURNS BOOLEAN 
-	BEGIN
-		DECLARE bankName , msgType , msg_Type , msgIdentifier , bankIdentifier , refNo , fileName , seqNo,resCodeID,trans_date CHARACTER ;
-		DECLARE count , count1 INTEGER 0;
-		DECLARE fileLoc,ftpProvider , key CHARACTER;
-		DECLARE batchBankIFSC , batchBank , newBatchBankIFSC CHARACTER;		
-		DECLARE dbCount INTEGER 0 ;
-		DECLARE i INTEGER 1 ;
-		DECLARE rc BOOLEAN ;
-		DECLARE found BOOLEAN TRUE;
-		DECLARE inMsgDetailsref REFERENCE TO InputRoot.DFDL ;
-		DECLARE msg CHARACTER FIELDNAME(inMsgDetailsref.*);
-		DECLARE outMsgDetailsRef REFERENCE TO OutputRoot;
-		DECLARE headerRef REFERENCE TO inMsgDetailsref.*.header;
-		DECLARE bodyRef REFERENCE TO inMsgDetailsref.*.body;
-		DECLARE recordRef REFERENCE TO inMsgDetailsref.*.body.record[>];
-		DECLARE mqRfh2Ref REFERENCE TO InputRoot.MQRFH2.usr.BankDetails ;
-		SET Environment.Type = 'NEFT_IN';
-		SET bankName = mqRfh2Ref.BankName ;
-		
-		SET trans_date=headerRef.Date_Time;
-		Declare transDate CHARACTER;
-		SET transDate =SUBSTRING(trans_date  from 1 for 8);
-		SET msgType = headerRef.SubMessage_Type ;
-		SET msg_Type = msgType;
-		SET msgIdentifier = headerRef.Message_Identifier ;
-		SET bankIdentifier = headerRef.BankApp_Identifier ;
-		
-		--new requirement for idbi utr in neft
-		DECLARE idbi_utr CHARACTER;
-		SET idbi_utr = headerRef.Utr;
-		
-		DECLARE DB_Details , DB_Count , DB_Count_IN , DB_Count_MSG_IN , DB_Bank_Details, DB_Info, Desc_Details ROW;
-		DECLARE sysDate CHARACTER CAST(CURRENT_DATE AS CHARACTER FORMAT 'ddMMyyyy');
-		DECLARE sysDateForFile CHARACTER CAST(CURRENT_DATE AS CHARACTER FORMAT 'yyyyMMdd');
-		
-		DECLARE Qry CHARACTER 'SELECT A.NEFTCOUNT FROM '||SCHEMANAME||'.'||BANKCOUNT_TABLENAME||' A WHERE A.BANKNAME = ? ';
-		SET DB_Details.A[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(bankName));			
-		
-		DECLARE dbDetailsRef REFERENCE TO DB_Details;
-    	MOVE dbDetailsRef FIRSTCHILD;
-    	DECLARE tempDbRef REFERENCE TO dbDetailsRef;
-		SET count = tempDbRef.NEFTCOUNT;
-		
-		SET count1 = count + 1 ;
-		
-		IF count1 > 99999 THEN
-			SET count1 = '0';
-		END IF;
-		
-		SET Qry =  'UPDATE '||SCHEMANAME||'.'||BANKCOUNT_TABLENAME|| ' A SET A.NEFTCOUNT = ? WHERE A.BANKNAME = ? ' ;
-		SET DB_Info.B[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(count1,bankName));
-	
-		DECLARE flag CHARACTER CAST(count AS CHARACTER);
-		DECLARE len INTEGER ;
-		SET len = LENGTH(flag);
-		WHILE len < 5 DO
-			SET flag = '0'||flag ;
-			SET len =len + 1 ; 
-		END WHILE;			
-		
-		DECLARE seqInHeader CHARACTER ;
-		SET seqInHeader = flag;
-		DECLARE seqLen INTEGER;
-		SET seqLen = LENGTH(seqInHeader);
-		WHILE seqLen < 7 DO
-			SET seqInHeader = '0'||seqInHeader;
-			SET seqLen = seqLen + 1;			
-		END WHILE; 
-		
-		SET refNo = sysDate||'_'||SUBSTRING(bankName FROM 1 FOR 4)||'_'||flag ;
-	
-		SET OutputRoot.MQRFH2.usr.BankDetails.RefNo = refNo ;				
-		CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Generated Reference Number : '||refNo) INTO rc;
-		
-		IF msgIdentifier = 'F27' OR bankIdentifier = 'F27' THEN
-			DECLARE temBankName CHARACTER;
-			DECLARE temBankNameLen INTEGER;
-			SET temBankName = bankName;
-			SET temBankNameLen = LENGTH(temBankName);
-			
-			WHILE temBankNameLen < 6 DO
-				SET temBankName = temBankName || ' ';
-				SET temBankNameLen = temBankNameLen + 1;
-			END WHILE;
-			
-			CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Message Belogs To F27 Category') INTO rc;	
-			DECLARE  resCode ,lastModTime , lastUpdStamp CHARACTER '';
-			SET lastUpdStamp = CURRENT_TIMESTAMP ;
-			SET lastModTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd-MMM-yyyy HH:mm:ss');
-			SET seqNo = headerRef.Sequence_Number ;
-			SET resCode = headerRef.BankAPI_Response_Code;  			
-			SET resCodeID = SUBSTRING(resCode FROM 1 FOR 1);
-			DECLARE countlen INTEGER 0 ;		
-			SET countlen = LENGTH(seqNo);
+{A:RTGF01O298R41MAHG0000001RBIN0RTGS00222000MAHGH458410002092XXX2025070412282000000000XXXXXXXXXMAHGH4584100020999}{4:
+:2020:MAHGH45841000209
+:4488:20250704INR380000,00
+:5500:98617041609
+Collector Office Nanded
+MGB Vazirabad
+:5518:MAHG0004160
+:6500:BMCB0000033
+:5561:/157110100045235
+Madarsa Sayyad Hafsa Lilbanat
+Nai Abadi Mudkhed
+:7023:Collector Office Payment
+:7495:/ATTN/Collector Office Payment/
+-}           
 
 
-			DECLARE hhmmss CHARACTER CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'HHmmss');
-			DECLARE hhmm CHARACTER;
-			SET hhmm = SUBSTRING(hhmmss FROM 1 FOR 4);
+dekh bhai yaha pe issuse aa raha ismai <ClrSysMmbId>
+							<MmbId/>
+						</ClrSysMmbId> empty jaa raha hai 
 
-			WHILE countlen < 9 DO
-				SET seqNo = '0' || seqNo ;
-				SET countlen = countlen + 1 ;
-			END WHILE;
-				SET Qry = 'SELECT count(*) as count FROM '||SCHEMANAME||'.'||NEFT_OUT_TABLENAME||' A WHERE A.seqinheader = ? and A.TRAN_DATE= ?';			
-			
-			IF CONTAINS(resCode , 'F') OR CONTAINS(resCode , 'P')THEN
-				DECLARE flag INTEGER 0 ;
-				SET DB_Details.A[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(seqNo ,transDate));
-							  
-				DECLARE dbDetailsRef REFERENCE TO DB_Details;
-    			MOVE dbDetailsRef FIRSTCHILD;
-    			DECLARE tempDbRef REFERENCE TO dbDetailsRef;							
-				
-				SET flag = tempDbRef.COUNT ;
-				 				
-				IF flag > 0 THEN
-					IF CONTAINS(resCodeID , 'F') THEN
-						
-				-------------------------------------------(N09)---------------------------------------------	
-					
-						CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','The Requested Message Belongs to FBAPI with response code as :'||resCode||' and sequence number as :'||seqNo) INTO rc;
-						SET Qry =  'UPDATE '||SCHEMANAME||'.'||NEFT_OUT_TABLENAME|| ' A SET A.ACK_NACK= ''F'' ,A.LAST_MOD_TIME= ? ,A.LAST_UPD_STAMP= ? WHERE A.seqinheader = ? and A.TRAN_DATE= ?';
-						SET DB_Details.A[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(lastModTime,lastUpdStamp,seqNo,transDate));
-						DECLARE Sub_Msg_Type CHARACTER;
-						
-						CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Data Updated to NEFT_OUT Table') INTO rc;
-						
-						DECLARE qry1 CHARACTER 'SELECT DESCRIP FROM '||SCHEMANAME||'.'||F27_TABLENAME||' A WHERE A.REASONCODE=?';
-						SET Desc_Details.A[] = PASSTHRU(qry1 TO Database.{DSNNAME} VALUES(resCode));
-					
-						DECLARE qry2 CHARACTER 'SELECT SUB_MSG_TYPE,IFSC_SENDER,IFSC_RECVR,TRAN_REF_NO,TRAN_DATE,CREATION_TIME FROM '||SCHEMANAME||'.'||NEFT_OUT_TABLENAME|| ' B WHERE B.seqinheader = ? and B.TRAN_DATE= ?';
-						SET DB_Details.B[] =PASSTHRU(qry2 TO Database.{DSNNAME} VALUES(seqNo ,transDate));
-						
-					
-						DECLARE recordReff REFERENCE TO DB_Details.B[1];
-						DECLARE desc REFERENCE TO Desc_Details;
-						DECLARE cnt CHARACTER CAST(count AS CHARACTER);
-						
-				--changes by pradip for n07 messages
-						SET Sub_Msg_Type = TRIM(recordReff.SUB_MSG_TYPE);
-						
-						IF Sub_Msg_Type = 'N07' THEN
-							SET fileName = 'NEFT_'||sysDateForFile||'_'||cnt||'.TXT';
-							SET OutputLocalEnvironment.Destination.File.Name =fileName;
-							
-							SET key = bankName||'_'||msgIdentifier;
-							
-							CALL getProp(PROP_LOC, key, fileLoc, ftpProvider , bankName);
-							SET OutputLocalEnvironment.Destination.File.Remote.Server = ftpProvider;
-				       		SET OutputLocalEnvironment.Destination.File.Remote.ServerDirectory = fileLoc;
-				       		CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN', 'file name : '||fileName) INTO rc;
-				        	CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','FTP Provider Name :'||ftpProvider) INTO rc;
-				        	CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Remote Location Diretory Name :'||fileLoc) INTO rc;
-				       		SET OutputRoot.DFDL = inMsgDetailsref;
-				       		PROPAGATE TO TERMINAL 'out' DELETE NONE;
-							RETURN FALSE;
-						ELSE
-							SET Environment.msgType='N09';
-					        SET OutputRoot.DFDL.N09.header.Block_A_Identifier='{A:';
-					        SET OutputRoot.DFDL.N09.header.BankApp_Identifier='RTG';
-					        SET OutputRoot.DFDL.N09.header.Message_Identifier='F01';
-					        SET OutputRoot.DFDL.N09.header.IO_Identifier='I';
-				            SET OutputRoot.DFDL.N09.header.Message_Type='298';
-				            SET OutputRoot.DFDL.N09.header.SubMessage_Type='N09';
-					        SET OutputRoot.DFDL.N09.header.Sender_IFSC=TRIM(recordReff.IFSC_RECVR);
-					        SET OutputRoot.DFDL.N09.header.Receiver_IFSC=TRIM(recordReff.IFSC_SENDER);
-					        SET OutputRoot.DFDL.N09.header.Delivery_Monitoring_Flag='2';
-					        SET OutputRoot.DFDL.N09.header.Open_Notification_Number='2';
-					        SET OutputRoot.DFDL.N09.header.NonDelivery_Warning_Flag='2';
-					        SET OutputRoot.DFDL.N09.header.Obsolescence_Period='000';
-					        SET OutputRoot.DFDL.N09.header.MUR=TRIM(recordReff.TRAN_REF_NO);
-					        SET OutputRoot.DFDL.N09.header.Possible_Duplicate_Flag='2';
-					        SET OutputRoot.DFDL.N09.header.Service_Identifier='RTG';
-					        SET OutputRoot.DFDL.N09.header.Originate_Date=TRIM(recordReff.TRAN_DATE);
-					        SET OutputRoot.DFDL.N09.header.Originate_Time=hhmm;
-					        SET OutputRoot.DFDL.N09.header.Testing_Training_Flag='2';
-					        SET OutputRoot.DFDL.N09.header.Sequence_Number='000000000';
-					        SET OutputRoot.DFDL.N09.header.Filler='XXXXXXXXX';
-					        SET OutputRoot.DFDL.N09.header.Unique_Transaction_Number=TRIM(recordReff.TRAN_REF_NO);
-					        SET OutputRoot.DFDL.N09.header.RTGS_Priority='99';
-					        SET OutputRoot.DFDL.N09.header.Block_A_End_Identifer='}';
-					        SET OutputRoot.DFDL.N09.body.Block_4_Initiator='{4:';
-					        SET OutputRoot.DFDL.N09.body.Transaction_Reference_Number=TRIM(recordReff.TRAN_REF_NO);
-					        SET OutputRoot.DFDL.N09.body.Status='N';
-					        --SET OutputRoot.DFDL.N09.body.Reason=resCode;
-					        SET OutputRoot.DFDL.N09.body.Reason=SUBSTRING(resCode FROM (length(resCode) - 2) FOR 3);
-						    SET OutputRoot.DFDL.N09.body.Description=desc.*.DESCRIP;
-				   		    -- DECLARE cnt CHARACTER CAST(count AS CHARACTER);
-					        CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','F27 CONVERTED INTO N09') INTO rc;
-					        SET fileName ='RTGSRBI_NEFT_'||sysDateForFile||'_'||seqNo||'_'||cnt||'.txt';
-			                SET OutputLocalEnvironment.Destination.File.Name =fileName;
-					        SET key =bankName||'_N09';
-				       		
-				       		CALL getProp(PROP_LOC, key, fileLoc, ftpProvider , bankName);
-						       
-					        SET OutputLocalEnvironment.Destination.File.Remote.Server = ftpProvider;
-					        SET OutputLocalEnvironment.Destination.File.Remote.ServerDirectory = fileLoc;
-					        CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN', 'FILE NAME : '||fileName) INTO rc;
-					        CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','FTP Provider Name :'||ftpProvider) INTO rc;
-					        CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Remote Location Diretory Name :'||fileLoc) INTO rc;
-				     	   	PROPAGATE TO TERMINAL 'out1' DELETE NONE;
-			          		RETURN FALSE;
-						END IF;
-						
-						---------------------------------------------------------------
-					END IF;
-					
---					IF CONTAINS(resCodeID , 'F') THEN
---						CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','The Requested Message Belongs to FBAPI with response code as :'||resCode||' and sequence number as :'||seqNo) INTO rc;
---						SET Qry =  'UPDATE '||SCHEMANAME||'.'||NEFT_OUT_TABLENAME|| ' A SET A.ACK_NACK= ''N'' , A.IDBI_UTR= ?, A.LAST_MOD_TIME= ? ,A.LAST_UPD_STAMP= ? WHERE A.seqinheader = ? and A.TRAN_DATE= ?';
---					END IF;	
-					
-					IF CONTAINS(resCodeID , 'P') THEN
-						CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','The Requested Message Belongs to PBAPI with response code as :'||resCode||' and sequence number as :'||seqNo) INTO rc;
-						SET Qry =  'UPDATE '||SCHEMANAME||'.'||NEFT_OUT_TABLENAME|| ' A SET A.ACK_NACK= ''P'' , A.IDBI_UTR= ?, A.LAST_MOD_TIME= ? ,A.LAST_UPD_STAMP= ? WHERE A.seqinheader = ? and A.TRAN_DATE= ?';	
-					END IF;
-								
-					SET DB_Details.A[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(idbi_utr, lastModTime, lastUpdStamp, seqNo, transDate));
-					CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Data Updated to NEFT_OUT Table') INTO rc;			
-				END IF;
-			END IF;
-		END IF;
-		
-		WHILE LASTMOVE(recordRef) DO
-			
-			DECLARE tranRefNo , tranRefReturnUtr,batchTime ,ifscSender,senderAcctType,senderAcctNo ,senderAcctName,remitterDetail ,remitterDetail1  ,remitterDetail2  ,remitterDetail3  , remitterDetail4  ,ifscRecvr ,recvrAcctType ,recvrAcctNo ,recvrAcctName ,benefAddrs ,benefAddrs1 ,benefAddrs2 ,benefAddrs3 ,benefAddrs4 ,remitInfo ,remitInfo1 ,remitInfo2 ,remitInfo3 ,remitInfo4 ,remitInfo5 ,remitInfo6 ,rejectCode ,rejectReason ,amount ,orgTranDate ,tranDate CHARACTER '';
-			DECLARE creationTime , creationTimeStamp , lastModTime, tranBranch , refNum , lastUpdStamp  CHARACTER '';
-			DECLARE ackNack,ackNackFromCbs,retAcknackErr,dupAcknackOut,flagFileCreated,ackNackMsg,ackNackSendMq CHARACTER '';
-			SET tranRefNo = recordRef.Transaction_RefNumber ;
-			SET OutputRoot.MQRFH2.usr.BankDetails.tranRefNo = tranRefNo ;			
-			SET msg_Type = msgType;
-			
-			IF msgType = 'N02' THEN
-								
-				CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Transaction Reference Number :'||tranRefNo) INTO rc;												
-								
-				SET tranRefReturnUtr = recordRef.Related_RefNumber ;		
-				SET batchTime = bodyRef.Batch_Time ;
-				SET ifscSender = recordRef.Sending_Branch_IFSC;
-				SET senderAcctType = recordRef.Sending_Customer_AccType ;
-				SET senderAcctNo = recordRef.Customer_Acc ;
-				SET senderAcctName = recordRef.Customer_AccName ;
-				SET remitterDetail1 = recordRef.Originator_of_Remittance.Line1 ;
-				SET remitterDetail2 = recordRef.Originator_of_Remittance.Line2 ;
-				SET remitterDetail3 = recordRef.Originator_of_Remittance.Line3 ;
-				SET remitterDetail4 = recordRef.Originator_of_Remittance.Line4 ;
-				IF LENGTH(remitterDetail1) <> 0 THEN
-					SET remitterDetail = remitterDetail1 ;
-					IF LENGTH(remitterDetail2) <> 0 THEN
-						SET remitterDetail = remitterDetail || remitterDetail2 ;
-					END IF;
-					IF LENGTH(remitterDetail3) <> 0 THEN
-						SET remitterDetail = remitterDetail || remitterDetail3 ;
-					END IF;
-					IF LENGTH(remitterDetail4) <> 0 THEN
-						SET remitterDetail = remitterDetail || remitterDetail4 ;
-					END IF;
-				END IF;
-				
-				SET ifscRecvr = recordRef.BenfBranch_IFSC ;
-				SET recvrAcctType = recordRef.BenfCustomer_AccType ;
-				SET recvrAcctNo = recordRef.BenfCustomer_Acc ;
-				SET recvrAcctName = recordRef.BenfCustomer_AccName ;
-				SET benefAddrs1 = recordRef.BenfCustomer_Address.Line1 ;
-				SET benefAddrs2 = recordRef.BenfCustomer_Address.Line2 ;
-				SET benefAddrs3 = recordRef.BenfCustomer_Address.Line3 ;
-				SET benefAddrs4 = recordRef.BenfCustomer_Address.Line4 ;
-				IF LENGTH(benefAddrs1) <> 0 THEN
-					SET benefAddrs = benefAddrs1 ;
-					IF LENGTH(benefAddrs2) <> 0 THEN
-						SET benefAddrs = benefAddrs || benefAddrs2 ;
-					END IF;
-					IF LENGTH(benefAddrs3) <> 0 THEN
-						SET benefAddrs = benefAddrs || benefAddrs3 ;
-					END IF;
-					IF LENGTH(benefAddrs4) <> 0 THEN
-						SET benefAddrs = benefAddrs || benefAddrs4 ;
-					END IF;
-				END IF;
-				SET remitInfo1 = recordRef.Remittance_information.Line1 ;
-				SET remitInfo2 = recordRef.Remittance_information.Line2 ;
-				SET remitInfo3 = recordRef.Remittance_information.Line3 ;
-				SET remitInfo4 = recordRef.Remittance_information.Line4 ;
-				SET remitInfo5 = recordRef.Remittance_information.Line5 ;
-				SET remitInfo6 = recordRef.Remittance_information.Line6 ;
-				IF LENGTH(remitInfo1) <> 0 THEN
-					SET remitInfo = remitInfo1 ;
-				END IF;
-				IF LENGTH(remitInfo1) <> 0 THEN
-					SET remitInfo = remitInfo1 ;
-					IF LENGTH(remitInfo2) <> 0 THEN
-						SET remitInfo = remitInfo || remitInfo2 ;
-					END IF;
-					IF LENGTH(remitInfo3) <> 0 THEN
-						SET remitInfo = remitInfo || remitInfo3 ;
-					END IF;
-					IF LENGTH(remitInfo4) <> 0 THEN
-						SET remitInfo = remitInfo || remitInfo4 ;
-					END IF;
-					IF LENGTH(remitInfo5) <> 0 THEN
-						SET remitInfo = remitInfo || remitInfo5 ;
-					END IF;
-					IF LENGTH(remitInfo6) <> 0 THEN
-						SET remitInfo = remitInfo || remitInfo6 ;
-					END IF;
-				END IF;
-				
-				SET rejectCode = recordRef.Reason_Code ;
-				SET rejectReason = recordRef.Rejection_Reason ;
-				SET amount = recordRef.Amount ;
-				SET orgTranDate = recordRef.Value_Date ;
-				SET tranDate = recordRef.Remittance_Date ;
+<RequestPayload>
+	<AppHdr
+		xmlns="urn:iso:std:iso:20022:tech:xsd:head.001.001.01"
+		xmlns:xsi="urn:iso:std:iso:20022:tech:xsd:Header">
+		<Fr>
+			<FIId>
+				<FinInstnId>
+					<ClrSysMmbId>
+						<MmbId>MAHG0000001</MmbId>
+					</ClrSysMmbId>
+				</FinInstnId>
+			</FIId>
+		</Fr>
+		<To>
+			<FIId>
+				<FinInstnId>
+					<ClrSysMmbId>
+						<MmbId>RBIN0RTGS00</MmbId>
+					</ClrSysMmbId>
+				</FinInstnId>
+			</FIId>
+		</To>
+		<BizMsgIdr>MAHG202507045841000209</BizMsgIdr>
+		<MsgDefIdr>pacs.008.001.03</MsgDefIdr>
+		<BizSvc>RTGSFIToFICustomerCredit</BizSvc>
+		<CreDt>2025-07-04T12:28:00Z</CreDt>
+		<Sgntr>
+			<XMLSgntrs
+				xmlns="http://www.w3.org/2000/09/xmldsig#">-----BEGIN PKCS7-----MIIIDQYJKoZIhvcNAQcCoIIH/jCCB/oCAQExCzAJBgUrDgMCGgUAMAsGCSqGSIb3
+DQEHAaCCBUcwggVDMIIEK6ADAgECAgopkuD8Kg7C51bfMA0GCSqGSIb3DQEBCwUA
+MIH3MQswCQYDVQQGEwJJTjFFMEMGA1UEChM8SW5zdGl0dXRlIGZvciBEZXZlbG9w
+bWVudCBhbmQgUmVzZWFyY2ggaW4gQmFua2luZyBUZWNobm9sb2d5MR0wGwYDVQQL
+ExRDZXJ0aWZ5aW5nIEF1dGhvcml0eTEPMA0GA1UEERMGNTAwMDU3MRIwEAYDVQQI
+EwlUZWxhbmdhbmExKjAoBgNVBAkTIVJvYWQgTm8uIDEsIE1hc2FiIFRhbmssIEh5
+ZGVyYWJhZDEVMBMGA1UEMxMMQ2FzdGxlIEhpbGxzMRowGAYDVQQDExFJRFJCVCBT
+dWIgQ0EgMjAyMjAeFw0yNDAxMDYwNDQ2MDZaFw0yNjAxMDUxODI5NTlaMBYxFDAS
+BgNVBAMTC01BSEcwMDAwMDAxMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKC
+AQEAhlAuZORPjOgWo/q+3DqHAqovu5K66pFGr5rSFAAOF063Yog3VGH4HfOY51mM
+EkMPrzlL9ZF50BWLIDyx9h8hMzi4fpqI/cbbelxW21OWjGbpkOCSJP4XshIQPX63
+gVI9kn8V3ZigrBCcerffyA5FNV1baNXNVsD/G9lUvGDRSe7qCwAiGyj82EGdg0vZ
+6SnCP4oZsMnO45smv0Scvdj3GCNHV2RhF86YcqMv2wXVYrjNIukkzBNMIApJy+l+
+/V/WBcWFtBLQSoKm+MV+MboLNdEIt6z1l07DxfRs7Y50/mjiVLtSA/4OpQgU59Zn
+K/KjVpPrGXLfxnx9DPWz0L5BUwIDAQABo4IBrzCCAaswDAYDVR0TAQH/BAIwADAO
+BgNVHQ8BAf8EBAMCBaAwEwYDVR0lBAwwCgYIKwYBBQUHAwIwHwYDVR0jBBgwFoAU
+ZsO0HVYz0YDt2g6kRxbTDreFAcMwHQYDVR0OBBYEFLxofH3qj3bYqDgFiidfR1s3
+GNUoMHEGCCsGAQUFBwEBBGUwYzA5BggrBgEFBQcwAoYtaHR0cDovL2lkcmJ0Y2Eu
+b3JnLmluL2NlcnQvSURSQlRTdWJDQTIwMjIuY2VyMCYGCCsGAQUFBzABhhpodHRw
+Oi8vb2NzcC5pZHJidGNhLm9yZy5pbjAPBgNVHREECDAGhwQKKwvCMGUGA1UdHwRe
+MFwwKqAooCaGJGh0dHA6Ly8xMC4wLjY1LjY1L0lEUkJUU3ViQ0EyMDIyLmNybDAu
+oCygKoYoaHR0cDovL2lkcmJ0Y2Eub3JnLmluL0lEUkJUU3ViQ0EyMDIyLmNybDBL
+BgNVHSAERDBCMEAGBmCCZGQCAzA2MDQGCCsGAQUFBwICMCgeJgBDAGwAYQBzAHMA
+IAAzACAAQwBlAHIAdABpAGYAaQBjAGEAdABlMA0GCSqGSIb3DQEBCwUAA4IBAQAZ
+lQYpcYRbhwfRx7Mpqo8zq8fmO3CRoOZ3NyJhbhmjlkhboODewln5hzn2YlFxr+bi
+hzyNd00kTnOKS84w3c5UlJL2eX1mhLaLY/A9zLAa09e/kAqPr/rcPgs+ZsBJE9MB
+0taqccVKcgX4pUs+kzFXNxdlCd9igV1D75WIk015NOLKBJSPlqU1rxXSy59th3tJ
+ZRewD8/0254g8u/ckKwRYXjcNxCDOCO6/iaWTtAjCGscOF7bK3SFgDrZzyZQZE38
+VJg8hVebEnQ8mA2JiXmpqw5aexUOHpypWsccpy0+YRn3+mCt1iRB/9tNUuMipVi0
+MWS0bgyWt9yc6xTcaiMhMYICjjCCAooCAQEwggEGMIH3MQswCQYDVQQGEwJJTjFF
+MEMGA1UEChM8SW5zdGl0dXRlIGZvciBEZXZlbG9wbWVudCBhbmQgUmVzZWFyY2gg
+aW4gQmFua2luZyBUZWNobm9sb2d5MR0wGwYDVQQLExRDZXJ0aWZ5aW5nIEF1dGhv
+cml0eTEPMA0GA1UEERMGNTAwMDU3MRIwEAYDVQQIEwlUZWxhbmdhbmExKjAoBgNV
+BAkTIVJvYWQgTm8uIDEsIE1hc2FiIFRhbmssIEh5ZGVyYWJhZDEVMBMGA1UEMxMM
+Q2FzdGxlIEhpbGxzMRowGAYDVQQDExFJRFJCVCBTdWIgQ0EgMjAyMgIKKZLg/CoO
+wudW3zAJBgUrDgMCGgUAoF0wGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkq
+hkiG9w0BCQUxDxcNMjUwNzA0MDY1ODUwWjAjBgkqhkiG9w0BCQQxFgQU4JRgIQEd
+wSK4l6RqFNN6nHBvfVgwDQYJKoZIhvcNAQEBBQAEggEAeQ8IQ04OG2GksiIpOB6F
+UJCtKbadZwZMripUBh8AhjsfpRxxJIummNdTsWJLbk/h7AfgnWnh3iSga16w7B1O
+FlJGr8eUhAVGLOb5EsZnGPJfQhn7SCaq+swXp1BVb5JxuNhbjozOtXqynZPCWfjU
+YOUSPFN6Id0/fKRnqFnQpTaDSw/snO20BcyfvT8r9UqhqLLZKsS2l6eGTzu8DjD0
+eLln/6lXCmwZl0NyKHiA/EFXF3aFHDt0thJ8BUNa3uHDWVTaohe3uGzU9xPyJe3M
+SEodVyR4oHpwaO1T+nwarECoerjZY9xtcStyFMWNywdKriCxDYjx0J8HQcDFpd6f
+Fg==
+-----END PKCS7-----
+			</XMLSgntrs>
+		</Sgntr>
+	</AppHdr>
+	<Document
+		xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.03"
+		xmlns:xsi="urn:iso:std:iso:20022:tech:xsd:R41">
+		<FIToFICstmrCdtTrf>
+			<GrpHdr>
+				<MsgId>MAHG202507045841000209</MsgId>
+				<CreDtTm>2025-07-04T12:28:00</CreDtTm>
+				<NbOfTxs>1</NbOfTxs>
+				<TtlIntrBkSttlmAmt Ccy="INR">380000.00</TtlIntrBkSttlmAmt>
+				<IntrBkSttlmDt>2025-07-04</IntrBkSttlmDt>
+				<SttlmInf>
+					<SttlmMtd>CLRG</SttlmMtd>
+				</SttlmInf>
+				<InstgAgt>
+					<FinInstnId>
+						<ClrSysMmbId>
+							<MmbId>MAHG0000001</MmbId>
+						</ClrSysMmbId>
+					</FinInstnId>
+				</InstgAgt>
+				<InstdAgt>
+					<FinInstnId>
+						<ClrSysMmbId>
+							<MmbId/>
+						</ClrSysMmbId>
+					</FinInstnId>
+				</InstdAgt>
+			</GrpHdr>
+			<CdtTrfTxInf>
+				<PmtId>
+					<EndToEndId>/XUTR/MAHGH45841000209</EndToEndId>
+					<TxId>MAHGR52025070441000209</TxId>
+				</PmtId>
+				<PmtTpInf>
+					<InstrPrty>HIGH</InstrPrty>
+					<SvcLvl>
+						<Prtry>TTC=1000,PRI=80</Prtry>
+					</SvcLvl>
+					<LclInstrm>
+						<Prtry>RTGSFIToFICustomerCredit</Prtry>
+					</LclInstrm>
+					<CtgyPurp>
+						<Cd>CASH</Cd>
+					</CtgyPurp>
+				</PmtTpInf>
+				<IntrBkSttlmAmt Ccy="INR">380000.00</IntrBkSttlmAmt>
+				<ChrgBr>DEBT</ChrgBr>
+				<Dbtr>
+					<Nm>Collector Office Nanded</Nm>
+				</Dbtr>
+				<DbtrAcct>
+					<Id>
+						<Othr>
+							<Id>98617041609</Id>
+						</Othr>
+					</Id>
+					<Ccy>INR</Ccy>
+				</DbtrAcct>
+				<DbtrAgt>
+					<FinInstnId>
+						<ClrSysMmbId>
+							<MmbId>MAHG0004160</MmbId>
+						</ClrSysMmbId>
+						<Nm>MAHG Bank</Nm>
+					</FinInstnId>
+				</DbtrAgt>
+				<CdtrAgt>
+					<FinInstnId>
+						<ClrSysMmbId>
+							<MmbId>BMCB0000033</MmbId>
+						</ClrSysMmbId>
+						<Nm>BMCB Bank</Nm>
+					</FinInstnId>
+				</CdtrAgt>
+				<Cdtr>
+					<Nm>Madarsa Sayyad Hafsa Lilbanat</Nm>
+				</Cdtr>
+				<CdtrAcct>
+					<Id>
+						<Othr>
+							<Id>157110100045235</Id>
+						</Othr>
+					</Id>
+					<Ccy>INR</Ccy>
+				</CdtrAcct>
+				<InstrForCdtrAgt>
+					<Cd>PHOB</Cd>
+				</InstrForCdtrAgt>
+				<RmtInf>
+					<Ustrd>/ATTN/Collector Office Payment/</Ustrd>
+				</RmtInf>
+			</CdtTrfTxInf>
+		</FIToFICstmrCdtTrf>
+	</Document>
+</RequestPayload>
 
-				SET creationTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd-MMM-yyyy HH:mm:ss');
-				SET lastModTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd-MMM-yyyy HH:mm:ss');
-				SET tranBranch = '99922' ;
-				SET refNum = refNo ;
-				
-				IF LENGTH(tranRefReturnUtr) <> 0 THEN
-					SET msg_Type = 'N2R';
-					SET Qry =  'UPDATE '||SCHEMANAME||'.'||NEFT_OUT_TABLENAME|| ' A SET A.OUT_MSG_SENT_SBI=''R'' , A.ACK_NACK= ''N'' , A.TRAN_REF_RETURN_UTR = ? WHERE A.TRAN_REF_NO = ?';			
-				
-					SET DB_Details.A[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(tranRefNo , tranRefReturnUtr));
-					CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Data Updated to NEFT_OUT Table with R in OUT_MSG_SENT_SBI') INTO rc;
-				END IF;
-				
-				DECLARE tempTranRefNo CHARACTER;
-				DECLARE tempTranRefNoLen, i INTEGER;
-				set tempTranRefNo = tranRefNo;
-				set tempTranRefNoLen = LENGTH(tempTranRefNo);
-			
-				WHILE tempTranRefNoLen < 16  DO
-					set tempTranRefNo = tempTranRefNo || ' ';
-					set tempTranRefNoLen = tempTranRefNoLen + 1;
-				END WHILE;
-				
-				SET Qry = 'SELECT Count(*) as count FROM '||SCHEMANAME||'.'||NEFT_IN_TABLENAME||' A WHERE A.TRAN_REF_NO = ?';
-				SET DB_Count.C[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(tempTranRefNo));
-				DECLARE DbCountRef REFERENCE TO DB_Count;
-				MOVE DbCountRef FIRSTCHILD;
-				DECLARE TempDbCountRef REFERENCE TO DbCountRef;
-							
-				SET dbCount = TempDbCountRef.COUNT ;
-				
-				IF dbCount = 0 THEN
-					INSERT INTO Database.{DSNNAME}.{SCHEMANAME}.{NEFT_IN_TABLENAME} (
-									TRAN_REF_NO ,
-									TRAN_REF_RETURN_UTR ,
-									BATCH_TIME ,
-									IFSC_SENDER,
-									SENDER_ACCT_TYPE,
-									SENDER_ACCT_NO,
-									SENDER_ACCT_NAME,
-									REMITTER_DETAIL,
-									IFSC_RECVR,
-									RECVR_ACCT_TYPE,
-									RECVR_ACCT_NO,
-									RECVR_ACCT_NAME,
-									BENEF_ADDRS,
-									REMIT_INFO,
-									REJECT_CODE,
-									REJECT_REASON,
-									AMOUNT,
-									ORG_TRAN_DATE,
-									TRAN_DATE,
-									ACK_NACK,
-									ACK_NACK_FROM_CBS,
-									BANKNAME,
-									RET_ACKNACK_ERR,
-									DUP_ACKNACK_OUT,
-									FLAG_FILE_CREATED,
-									CREATION_TIME,
-									LAST_MOD_TIME,
-									ACK_NACK_MSG,
-									ACK_NACK_SEND_MQ,
-									TRAN_BRANCH,
-									REF_NO,
-									SEQINHEADER,
-									MSG_TYPE,
-									LAST_UPD_STAMP,
-									CREATION_TIME_STAMP  ) VALUES (
-										tranRefNo , 
-										tranRefReturnUtr,
-										batchTime ,
-										ifscSender,
-										senderAcctType,
-										senderAcctNo ,
-										senderAcctName,
-										remitterDetail ,
-										ifscRecvr ,
-										recvrAcctType ,
-										recvrAcctNo ,
-										recvrAcctName ,
-										benefAddrs ,
-										remitInfo ,
-										rejectCode ,
-										rejectReason ,
-										amount ,
-										orgTranDate ,
-										tranDate ,
-										'0',
-										'0',
-										bankName,
-										'0',
-										'0',
-										flagFileCreated,
-										creationTime , 
-										lastModTime, 
-										'0',
-										'0',
-										tranBranch , 
-										refNum ,
-										seqInHeader , 
-										msg_Type ,
-										CURRENT_TIMESTAMP ,
-										CURRENT_TIMESTAMP 
-									);
-									CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Data inserted to NEFT_IN Table') INTO rc;						
-				END IF;
-				
-				
-			ELSEIF msgType = 'N10' THEN
-				DECLARE tranRefNo , tranRefReturnUtr , lastModTime , relatedRefNo CHARACTER ;
-				DECLARE lastUpdStamp TIMESTAMP ;
-				SET tranRefNo = recordRef.Transaction_RefNumber ;
-				SET tranRefReturnUtr = recordRef.Related_RefNumber ;	
-				SET relatedRefNo = recordRef.Related_RefNumber;
-				
-				SET OutputRoot.MQRFH2.usr.BankDetails.tranRefNo = relatedRefNo;
-				
-				CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Transaction Reference Number :'||tranRefNo) INTO rc;			
-				
-				SET lastModTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd-MMM-yyyy HH:mm:ss');				
-				SET Qry =  'UPDATE '||SCHEMANAME||'.'||NEFT_OUT_TABLENAME|| ' A SET A.N10_ACKNACK = ''Y'' , A.ACK_NACK= ''Y'' , A.OUT_MSG_SENT_SBI= ''Y'' ,A.LAST_MOD_TIME= ? ,A.LAST_UPD_STAMP= ? WHERE A.TRAN_REF_NO = ? ';								
-				
-				DECLARE temprelatedRefNo CHARACTER;
-				DECLARE temprelatedRefNoLen INTEGER;
-				set temprelatedRefNo = relatedRefNo;
-				set temprelatedRefNoLen = LENGTH(temprelatedRefNo);
-				WHILE temprelatedRefNoLen < 20  DO
-					set temprelatedRefNo = temprelatedRefNo || ' ';
-					set temprelatedRefNoLen = temprelatedRefNoLen + 1;
-				END WHILE;
-				
-				SET DB_Details.A[] = PASSTHRU (Qry TO Database.{DSNNAME} VALUES(lastModTime,CURRENT_TIMESTAMP ,temprelatedRefNo));								 
-				CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Data Updated to NEFT_OUT Table') INTO rc;	
-				
-			ELSEIF msgType = 'N09' THEN			
-				SET tranRefNo = bodyRef.Transaction_Reference_Number;
-				CALL log4j_1_1('DB_INSERT', 'File1', 'WARN','Transaction Reference Number :'||tranRefNo) INTO rc;
-				SET Qry =  'UPDATE '||SCHEMANAME||'.'||NEFT_OUT_TABLENAME|| ' A SET A.OUT_MSG_SENT_SBI=''R'' , A.ACK_NACK= ''N'' WHERE A.TRAN_REF_NO = ?';			
-				SET DB_Details.A[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(tranRefNo));
-				CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Data Updated to NEFT_OUT Table') INTO rc;
-			END IF;	
-			
-			IF msgType = 'N02' THEN
-				DECLARE msg BLOB ;
-				
-				SET OutputRoot.DFDL.N02.header = InputRoot.DFDL.N02.header ;
-				SET OutputRoot.DFDL.N02.body.Block_4_Initiator = InputRoot.DFDL.N02.body.Block_4_Initiator;
-				SET OutputRoot.DFDL.N02.body.Transaction_Reference_Number = InputRoot.DFDL.N02.body.Transaction_Reference_Number;
-				SET OutputRoot.DFDL.N02.body.Batch_Time = InputRoot.DFDL.N02.body.Batch_Time;
-				SET OutputRoot.DFDL.N02.body.Total_No_of_transactions = InputRoot.DFDL.N02.body.Total_No_of_transactions;
-				SET OutputRoot.DFDL.N02.body.Total_amount = InputRoot.DFDL.N02.body.Total_amount;
-				SET OutputRoot.DFDL.N02.body.record[1] = InputRoot.DFDL.N02.body.record[i];
-				
-				SET msg = ASBITSTREAM(OutputRoot.DFDL, InputRoot.Properties.Encoding, InputRoot.Properties.CodedCharSetId );
-				
-				DECLARE test CHARACTER ;
-				SET test = CAST(msg AS CHARACTER CCSID InputRoot.Properties.CodedCharSetId);
-				SET creationTime = CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'dd-MMM-yyyy HH:mm:ss');
-						
-				SET Qry = 'SELECT Count(*) as count FROM '||SCHEMANAME||'.'||NEFT_MSG_IN_TABLENAME||' A WHERE A.REF_NO = ?';  --(FOR PRODUCTION THIS NEED TO BE UNCOMMENTED) BY SID --
-		--		SET Qry = 'SELECT Count(*) as count FROM '||SCHEMANAME||'.'||NEFT_MSG_IN_TABLENAME||' A WHERE A.TRAN_REF_NO = ?'; --(FOR PRODUCTION THIS NEED TO BE COMMENTED) BY SID --
-				SET DB_Count.C[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(tranRefNo));
-				DECLARE DbCountRef REFERENCE TO DB_Count;
-				MOVE DbCountRef FIRSTCHILD;
-				DECLARE TempDbCountRef REFERENCE TO DbCountRef;
-				
-				SET dbCount = TempDbCountRef.COUNT ;
-				
-				IF dbCount = 0 THEN
-				
-					INSERT INTO Database.{DSNNAME}.{SCHEMANAME}.{NEFT_MSG_IN_TABLENAME} ( 
-								REF_NO,  --(FOR PRODUCTION THIS TO BE UNCOMMENTED) BY SID --
-							--  TRAN_REF_NO, --(FOR PRODUCTION THIS NEED TO BE COMMENTED) BY SID --
-								MSG,
-								BANKNAME,
-								CREATION_TIME,
-								CREATION_TIME_STAMP) VALUES (
-								tranRefNo,
-								test,
-								bankName ,
-								creationTime , 
-								CURRENT_TIMESTAMP );
-								CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Data Inserted to NEFT_MSG_IN Table') INTO rc;
-								
-				END IF;
-			END IF;
-			SET msg_Type = NULL ;
-	    	MOVE recordRef NEXTSIBLING;
-		END WHILE;
-		
-		DECLARE flag1 CHARACTER CAST(count1 AS CHARACTER);				
-		SET fileName = 'NEFT_'||sysDateForFile||'_'||flag1||'_'||bankName||'.TXT';
-		
-		IF msgIdentifier = 'F27' THEN			
-			SET fileName = 'NEFT_'||sysDateForFile||'_'||seqNo||'.TXT';
-		END IF;
-	
-		CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','FileName : '||fileName) INTO rc;
-		SET OutputLocalEnvironment.Destination.File.Name = fileName;				
-								
-		IF msgIdentifier = 'F27' THEN		
-			SET key = bankName||'_'||msgIdentifier;
-		ELSE
-			SET key = bankName||'_'||msgType;
-		END IF;
-							
-		CALL getProp(PROP_LOC, key, fileLoc, ftpProvider , bankName);			
-		SET OutputLocalEnvironment.Destination.File.Remote.Server = ftpProvider;
-		SET OutputLocalEnvironment.Destination.File.Remote.ServerDirectory = fileLoc;
-		
-		CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','FTP Provider Name : '||ftpProvider) INTO rc;
-		CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Remote Location Diretory Name : '||fileLoc) INTO rc;		
-		SET OutputRoot.DFDL = inMsgDetailsref ;
-			
-	--	SET Qry =  'UPDATE '||SCHEMANAME||'.'||BANKCOUNT_TABLENAME|| ' A SET A.NEFTCOUNT = ?' ;
-	--	SET DB_Details.A[] = PASSTHRU (Qry TO Database.{DSNNAME} VALUES(count1));
-		
-	
-		IF dbCount <> 0 THEN
-			DECLARE DB_Duplicate ROW;
-			DECLARE flagFileCreated CHARACTER ;
-			DECLARE transactionRefNo CHARACTER InputRoot.DFDL.*.body.record.Transaction_RefNumber;
-			DECLARE Qry CHARACTER 'SELECT A.FLAG_FILE_CREATED FROM '||SCHEMANAME||'.'||NEFT_IN_TABLENAME||' A WHERE A.TRAN_REF_NO = ? ';
-			SET DB_Duplicate.A[] = PASSTHRU(Qry TO Database.{DSNNAME} VALUES(transactionRefNo));
-			
-			SET flagFileCreated = DB_Duplicate.A[1].FLAG_FILE_CREATED ;
-				IF flagFileCreated <> 'Y' OR flagFileCreated IS NULL OR flagFileCreated = '' THEN
-					RETURN TRUE ;
-				ELSE
-				CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','Duplicate Transaction Occured with Transaction Reference Number as : '||transactionRefNo) INTO rc;
-				CALL log4j_1_1('DB_INSERT', 'IDBI_NEFT_IN', 'WARN','---------------------------END-----------------------------') INTO rc;
-				RETURN FALSE ;	
-				END IF;
-		ELSE
-			RETURN TRUE ;
-		END IF;		
-	END;
 
-	CREATE PROCEDURE  getProp( IN P1 CHARACTER, IN P2 CHARACTER, INOUT P3 CHARACTER,INOUT P4 CHARACTER , IN P5 CHARACTER)
- 	LANGUAGE JAVA 
- 	EXTERNAL NAME "com.cedge.idbi.inward.rtgs.IDBI_NEFT_INWARD_LoadProperties.getProperties";
-	
-END MODULE;
+ab maine yeh neft message ko apne application mai pass karke dekha tuu tuje kahi issuse mil raha hai hai kya 
+yeh mera logical trree afetr mapping every fild mean txt to iso(xml) 
+
+XMLNSC
+	RequestPayload
+			AppHdr
+					Fr
+							FIId
+									FinInstnId
+											ClrSysMmbId
+													MmbId:CHARACTER:MAHG0000001
+					To
+							FIId
+									FinInstnId
+											ClrSysMmbId
+													MmbId:CHARACTER:RBIN0RTGS00
+					BizMsgIdr:CHARACTER:MAHG202507285841000209
+					MsgDefIdr:CHARACTER:pacs.008.001.03
+					BizSvc:CHARACTER:RTGSFIToFICustomerCredit
+					CreDt:CHARACTER:2025-07-28T12:28:00Z
+					AppHdr1:CHARACTER:urn:iso:std:iso:20022:tech:xsd:head.001.001.01
+					AppHdr99:CHARACTER:urn:iso:std:iso:20022:tech:xsd:Header
+			Document
+					FIToFICstmrCdtTrf
+							GrpHdr
+									MsgId:CHARACTER:MAHG202507285841000209
+									CreDtTm:CHARACTER:2025-07-28T12:28:00
+									NbOfTxs:CHARACTER:1
+									TtlIntrBkSttlmAmt:CHARACTER:380000.00
+											Ccy:CHARACTER:INR
+									IntrBkSttlmDt:CHARACTER:2025-07-28
+									SttlmInf
+											SttlmMtd:CHARACTER:CLRG
+									InstgAgt
+											FinInstnId
+													ClrSysMmbId
+															MmbId:CHARACTER:MAHG0000001
+									InstdAgt
+											FinInstnId
+													ClrSysMmbId
+															MmbId:CHARACTER:BMCB0000001
+							CdtTrfTxInf
+									PmtId
+											EndToEndId:CHARACTER:/XUTR/MAHGH45841000209
+											TxId:CHARACTER:MAHGR52025072841000209
+									PmtTpInf
+											InstrPrty:CHARACTER:HIGH
+											SvcLvl
+													Prtry:CHARACTER:TTC=1000,PRI=80
+											LclInstrm
+													Prtry:CHARACTER:RTGSFIToFICustomerCredit
+											CtgyPurp
+													Cd:CHARACTER:CASH
+									IntrBkSttlmAmt:CHARACTER:380000.00
+											Ccy:CHARACTER:INR
+									ChrgBr:CHARACTER:DEBT
+									Dbtr
+											Nm:CHARACTER:Collector Office Nanded
+									DbtrAcct
+											Id
+													Othr
+															Id:CHARACTER:98617041609
+											Ccy:CHARACTER:INR
+									DbtrAgt
+											FinInstnId
+													ClrSysMmbId
+															MmbId:CHARACTER:MAHG0004160
+													Nm:CHARACTER:MAHG Bank
+									CdtrAgt
+											FinInstnId
+													ClrSysMmbId
+															MmbId:CHARACTER:BMCB0000033
+													Nm:CHARACTER:BMCB Bank
+									Cdtr
+											Nm:CHARACTER:Madarsa Sayyad Hafsa Lilbanat
+									CdtrAcct
+											Id
+													Othr
+															Id:CHARACTER:157110100045235
+											Ccy:CHARACTER:INR
+									InstrForCdtrAgt
+											Cd:CHARACTER:PHOB
+									RmtInf
+											Ustrd:CHARACTER:/ATTN/Collector Office Payment/
+					AppHdr3:CHARACTER:urn:iso:std:iso:20022:tech:xsd:pacs.008.001.03
+					AppHdr8:CHARACTER:urn:iso:std:iso:20022:tech:xsd:R41
