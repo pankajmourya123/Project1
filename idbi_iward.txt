@@ -34,3 +34,32 @@ drwxr-xr-x    3 root     system          256 Jul 21 17:31 dynatrace
 -rw-r--r--    1 root     system         3535 Jan 06 2025  hardening_20250106_151315.log                                       
 -rw-r--r--    1 root     system        19632 Jan 06 2025  hardening_20250106_161023.log                                       
 -rw-r--r--    1 root     system         1989 Jan 03 2025  hawkey.log
+drw-r-----    2 root     system          256 Jul 22 18:14 SRC                                                                 
+drwxrwxr-x    2 adm      adm             256 Jan 03 2025  acct                                                                
+-rw-------    1 root     system       287606 Jul 28 16:24 authlog                                                             
+-rw-------    1 root     system       397641 Jul 23 16:47 authlog.0                                                           
+-rw-------    1 root     system       394968 Jul 16 16:27 authlog.1                                                           
+-rw-------    1 root     system       405916 Jul 09 16:12 authlog.2                                                           
+-rw-------    1 root     system       515887 Jul 02 16:24 authlog.3                                                           
+drwx------    4 root     system          256 Jan 03 2025  config                                                              
+drwx------    2 root     system          256 Jan 03 2025  corrals                                                             
+dr-xr-x---    2 bin      cron            256 Jan 22 2025  cron                                                                
+-rw-rw-r--    1 root     system          309 Jan 03 2025  dev_pkg.fail                                                        
+-rw-rw-r--    1 root     system          288 Jan 03 2025  dev_pkg.success                                                     
+drwxr-xr-x    2 bin      bin             256 Jan 03 2025  esa                                                                 
+drwxrwxrwt    4 root     system          256 Jan 03 2025  ffdc                                                                
+drwxr-xr-x    7 root     system         4096 Jan 15 2025  invscout                                                            
+drwxrwxr-x    2 root     system          256 Jun 25 16:25 nim                                                                 
+lrwxrwxrwx    1 root     system           13 Mar 27 12:31 perfmgr -> /var/perf/pm/                                            
+drwxrwxrwt   12 root     system         4096 Jun 25 16:28 ras                                                                 
+drwxr-xr-x    2 adm      adm             256 Jan 03 2025  sa                                                                  
+drwxrwxr-x    2 adm      adm             256 Nov 18 2024  streams                                                             
+-rw-------    1 root     system        20447 Jul 28 15:09 sulog                                                               
+drwxr-xr-x    3 root     system          256 Jan 03 2025  sw                                                                  
+-rw-r-----    1 root     system      8450108 Jul 28 16:25 syslog                                                              
+-rw-r-----    1 root     system     11617435 Jul 23 16:28 syslog.0                                                            
+-rw-r-----    1 root     system     12482236 Jul 16 16:28 syslog.1                                                            
+-rw-r-----    1 root     system     10214534 Jul 09 16:27 syslog.2                                                            
+-rw-r-----    1 root     system     24619490 Jul 02 16:27 syslog.3                                                            
+lrwxrwxrwx    1 root     system           16 Mar 27 12:31 wpars -> /var/adm/corrals                                           
+-rw-rw-r--    1 adm      adm         6819552 Jul 28 16:24 wtmp  
