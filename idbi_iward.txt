@@ -19,3 +19,18 @@ EOD_DATE         VARCHAR2(10)
 update neft_24X7 set SOD_DATE='20250728';  
 update RTGS_24X7 set SOD_DATE='20250728';
 commit;
+
+drwxr-xr-x    2 root     system         4096 Jul 27 01:24 aso                                                                 
+-rw-r--r--    1 root     system         5025 Mar 28 12:57 cache_mgt.dr.log                                                    
+drwxr-xr-x    2 bin      bin            4096 May 30 00:00 clcomd                                                              
+-rw-r-----    1 root     adm          137971 Jun 25 16:28 cloud-init-output.log                                               
+-rw-r--r--    1 root     system       136614 Jun 25 16:28 cloud-init.log                                                      
+drwxrwxrwx    3 root     system          256 Mar 04 19:10 commvault                                                           
+-rw-r--r--    1 root     system         8874 Jan 03 2025  dnf.librepo.log                                                     
+-rw-r--r--    1 root     system       106357 Jan 03 2025  dnf.log                                                             
+-rw-r--r--    1 root     system        15825 Jan 03 2025  dnf.rpm.log                                                         
+drwxr-xr-x    3 root     system          256 Jul 21 17:31 dynatrace                                                           
+-rw-r--r--    1 root     system         3598 Jan 06 2025  hardening_20250106_151143.log                                       
+-rw-r--r--    1 root     system         3535 Jan 06 2025  hardening_20250106_151315.log                                       
+-rw-r--r--    1 root     system        19632 Jan 06 2025  hardening_20250106_161023.log                                       
+-rw-r--r--    1 root     system         1989 Jan 03 2025  hawkey.log
